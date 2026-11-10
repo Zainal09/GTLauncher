@@ -7,13 +7,14 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Dikunci ke Ubuntu 24.04 supaya build tidak berubah saat "ubuntu-latest" pindah versi
+    runs-on: ubuntu-24.04
     steps:
       - name: Ambil kode
         uses: actions/checkout@v4
 
       - name: Pasang JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
