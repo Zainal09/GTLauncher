@@ -27,7 +27,10 @@ class AppAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_app, parent, false)
-        return VH(view)
+        val vh = VH(view)
+        vh.icon.applyIosCorners()
+        view.pressEffect()
+        return vh
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {

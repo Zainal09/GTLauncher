@@ -19,11 +19,15 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Gravity
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -34,16 +38,30 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.util.concurrent.Executors
 
+/** Grid yang tidak bisa di-scroll (untuk layar utama). */
+private class FixedGridLayoutManager(context: Context, span: Int) : GridLayoutManager(context, span) {
+    override fun canScrollVertically(): Boolean = false
+}
+
 class MainActivity : Activity() {
+
+    private companion object {
+        const val COLUMNS = 4
+        const val MAX_DOCK = 4
+        const val MAX_HOME = 12
+    }
 
     private lateinit var root: View
     private lateinit var homeLayer: View
     private lateinit var drawerLayer: View
     private lateinit var searchInput: EditText
     private lateinit var recycler: RecyclerView
+    private lateinit var homeRecycler: RecyclerView
     private lateinit var dock: LinearLayout
     private lateinit var prefs: SharedPreferences
-    private lateinit var adapter: AppAdapter
+    private lateinit var drawerAdapter: AppAdapter
+    private lateinit var homeAdapter: AppAdapter
+    private lateinit var flingDetector: GestureDetector
 
     private val executor = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
@@ -76,6 +94,7 @@ class MainActivity : Activity() {
         drawerLayer = findViewById(R.id.drawerLayer)
         searchInput = findViewById(R.id.searchInput)
         recycler = findViewById(R.id.recycler)
+        homeRecycler = findViewById(R.id.homeRecycler)
         dock = findViewById(R.id.dock)
 
         // Beri ruang untuk status bar, navigation bar, dan keyboard
@@ -83,21 +102,34 @@ class MainActivity : Activity() {
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
             )
-            homeLayer.setPadding(dp(24) + bars.left, bars.top, dp(24) + bars.right, bars.bottom)
-            drawerLayer.setPadding(dp(16) + bars.left, bars.top, dp(16) + bars.right, bars.bottom)
+            homeLayer.setPadding(dp(16) + bars.left, bars.top, dp(16) + bars.right, bars.bottom)
+            drawerLayer.setPadding(dp(20) + bars.left, bars.top, dp(20) + bars.right, bars.bottom)
             insets
         }
 
-        adapter = AppAdapter(
+        drawerAdapter = AppAdapter(
             onClick = { app -> launch(app) },
-            onLongClick = { app -> showAppMenu(app) }
+            onLongClick = { app -> showAppMenu(app, fromHome = false) }
         )
-        recycler.layoutManager = GridLayoutManager(this, 5)
-        recycler.adapter = adapter
+        recycler.layoutManager = GridLayoutManager(this, COLUMNS)
+        recycler.adapter = drawerAdapter
         recycler.setHasFixedSize(true)
 
-        setupHomeGestures()
-        setupDrawerGestures()
+        homeAdapter = AppAdapter(
+            onClick = { app -> launch(app) },
+            onLongClick = { app -> showAppMenu(app, fromHome = true) }
+        )
+        homeRecycler.layoutManager = FixedGridLayoutManager(this, COLUMNS)
+        homeRecycler.adapter = homeAdapter
+        homeRecycler.overScrollMode = View.OVER_SCROLL_NEVER
+
+        // Tahan area kosong di layar utama -> ganti wallpaper
+        homeLayer.setOnLongClickListener {
+            openWallpaperPicker()
+            true
+        }
+
+        setupGestures()
         setupSearch()
     }
 
@@ -143,62 +175,40 @@ class MainActivity : Activity() {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        // Launcher tidak boleh menutup dirinya sendiri; cukup tutup app drawer
+        // Launcher tidak boleh menutup dirinya sendiri; cukup tutup Pustaka Aplikasi
         if (drawerOpen) closeDrawer()
     }
 
     // ---------------------------------------------------------------- gestures
 
-    private fun setupHomeGestures() {
-        val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
-
+    private fun setupGestures() {
+        flingDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(
                 e1: MotionEvent?,
                 e2: MotionEvent,
                 velocityX: Float,
                 velocityY: Float
             ): Boolean {
-                if (velocityY < -800f) {
+                if (e1 == null) return false
+                val dy = e2.y - e1.y
+                // Geser ke atas di layar utama -> buka Pustaka Aplikasi
+                if (!drawerOpen && velocityY < -1200f && dy < -dp(80)) {
                     openDrawer()
                     return true
                 }
-                return false
-            }
-
-            override fun onLongPress(e: MotionEvent) {
-                try {
-                    startActivity(
-                        Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Ganti wallpaper")
-                    )
-                } catch (ex: Exception) {
-                    Toast.makeText(this@MainActivity, "Tidak bisa membuka pengaturan wallpaper", Toast.LENGTH_SHORT).show()
-                }
-            }
-        })
-        homeLayer.setOnTouchListener { _, ev -> detector.onTouchEvent(ev) }
-    }
-
-    private fun setupDrawerGestures() {
-        val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onFling(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                velocityX: Float,
-                velocityY: Float
-            ): Boolean {
-                // Geser cepat ke bawah saat daftar sudah di paling atas -> tutup drawer
-                if (velocityY > 2500f && !recycler.canScrollVertically(-1)) {
+                // Geser cepat ke bawah saat daftar sudah di paling atas -> tutup
+                if (drawerOpen && velocityY > 2000f && dy > dp(80) && !recycler.canScrollVertically(-1)) {
                     closeDrawer()
                     return true
                 }
                 return false
             }
         })
-        recycler.setOnTouchListener { _, ev ->
-            detector.onTouchEvent(ev)
-            false
-        }
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (::flingDetector.isInitialized) flingDetector.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
     }
 
     private fun setupSearch() {
@@ -218,6 +228,16 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun openWallpaperPicker() {
+        try {
+            startActivity(
+                Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Ganti wallpaper")
+            )
+        } catch (ex: Exception) {
+            Toast.makeText(this, "Tidak bisa membuka pengaturan wallpaper", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ---------------------------------------------------------------- data
 
     private fun loadApps() {
@@ -231,13 +251,14 @@ class MainActivity : Activity() {
                         label = it.loadLabel(pm).toString(),
                         packageName = it.activityInfo.packageName,
                         component = ComponentName(it.activityInfo.packageName, it.activityInfo.name),
-                        icon = it.loadIcon(pm)
+                        icon = it.loadIcon(pm).toIosBitmapDrawable(this)
                     )
                 }
                 .sortedBy { it.label.lowercase() }
             ui.post {
                 allApps = list
                 applyFilter()
+                renderHome()
                 renderDock()
             }
         }
@@ -250,7 +271,7 @@ class MainActivity : Activity() {
         } else {
             allApps.filter { it.label.contains(q, ignoreCase = true) }
         }
-        adapter.submit(filtered)
+        drawerAdapter.submit(filtered)
     }
 
     // ---------------------------------------------------------------- actions
@@ -268,28 +289,40 @@ class MainActivity : Activity() {
         if (drawerOpen) closeDrawer(immediate = true)
     }
 
-    private fun showAppMenu(app: AppInfo) {
-        val items = arrayOf("Tambah ke dock", "Info aplikasi", "Copot pemasangan")
+    private fun showAppMenu(app: AppInfo, fromHome: Boolean) {
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+
+        if (fromHome) {
+            labels.add("Hapus dari layar utama")
+            actions.add { removeFromHome(app) }
+        } else {
+            labels.add("Tambah ke layar utama")
+            actions.add { addToHome(app) }
+            labels.add("Tambah ke dock")
+            actions.add { addToDock(app) }
+        }
+        labels.add("Info aplikasi")
+        actions.add {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", app.packageName, null)
+                )
+            )
+        }
+        labels.add("Copot pemasangan")
+        actions.add {
+            startActivity(
+                Intent(Intent.ACTION_DELETE, Uri.fromParts("package", app.packageName, null))
+            )
+        }
+
         AlertDialog.Builder(this)
             .setTitle(app.label)
-            .setItems(items) { _, which ->
+            .setItems(labels.toTypedArray()) { _, which ->
                 try {
-                    when (which) {
-                        0 -> addToDock(app)
-                        1 -> startActivity(
-                            Intent(
-                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.fromParts("package", app.packageName, null)
-                            )
-                        )
-                        2 -> startActivity(
-                            Intent(
-                                Intent.ACTION_DELETE,
-                                Uri.fromParts("package", app.packageName, null)
-                            )
-                        )
-                        else -> {}
-                    }
+                    actions[which]()
                 } catch (e: Exception) {
                     Toast.makeText(this, "Aksi tidak tersedia", Toast.LENGTH_SHORT).show()
                 }
@@ -297,21 +330,23 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ---------------------------------------------------------------- drawer
+    // ---------------------------------------------------------------- Pustaka Aplikasi (drawer)
 
     private fun openDrawer() {
         if (drawerOpen) return
         drawerOpen = true
+        setBlur(true)
         drawerLayer.visibility = View.VISIBLE
         drawerLayer.alpha = 0f
-        drawerLayer.translationY = dp(80).toFloat()
-        drawerLayer.animate().alpha(1f).translationY(0f).setDuration(220).start()
-        homeLayer.animate().alpha(0f).setDuration(180).start()
+        drawerLayer.translationY = dp(60).toFloat()
+        drawerLayer.animate().alpha(1f).translationY(0f).setDuration(240).start()
+        homeLayer.animate().alpha(0f).scaleX(0.96f).scaleY(0.96f).setDuration(200).start()
     }
 
     private fun closeDrawer(immediate: Boolean = false) {
         if (!drawerOpen) return
         drawerOpen = false
+        setBlur(false)
         hideKeyboard()
         searchInput.setText("")
         searchInput.clearFocus()
@@ -322,16 +357,36 @@ class MainActivity : Activity() {
             drawerLayer.visibility = View.GONE
             homeLayer.animate().cancel()
             homeLayer.alpha = 1f
+            homeLayer.scaleX = 1f
+            homeLayer.scaleY = 1f
         } else {
             drawerLayer.animate()
                 .alpha(0f)
-                .translationY(dp(80).toFloat())
-                .setDuration(180)
+                .translationY(dp(60).toFloat())
+                .setDuration(200)
                 .withEndAction {
                     if (!drawerOpen) drawerLayer.visibility = View.GONE
                 }
                 .start()
-            homeLayer.animate().alpha(1f).setDuration(220).start()
+            homeLayer.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(240).start()
+        }
+    }
+
+    /** Blur latar belakang (Android 12+). Kalau perangkat tidak mendukung, diabaikan. */
+    private fun setBlur(enabled: Boolean) {
+        if (Build.VERSION.SDK_INT < 31) return
+        try {
+            val lp = window.attributes
+            if (enabled) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                lp.blurBehindRadius = 70
+            } else {
+                lp.blurBehindRadius = 0
+                window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            }
+            window.attributes = lp
+        } catch (e: Exception) {
+            // tidak didukung, abaikan
         }
     }
 
@@ -340,56 +395,59 @@ class MainActivity : Activity() {
         imm.hideSoftInputFromWindow(searchInput.windowToken, 0)
     }
 
+    // ---------------------------------------------------------------- penyimpanan daftar
+
+    private fun loadList(key: String): List<String>? =
+        prefs.getString(key, null)?.split(",")?.filter { it.isNotEmpty() }
+
+    private fun saveList(key: String, list: List<String>) {
+        prefs.edit().putString(key, list.joinToString(",")).apply()
+    }
+
+    private fun resolvePackages(intents: List<Intent>): List<String> =
+        intents.mapNotNull {
+            packageManager.resolveActivity(it, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        }.distinct()
+
     // ---------------------------------------------------------------- dock
 
-    private fun defaultDock(): List<String> {
-        val intents = listOf(
+    private fun defaultDock(): List<String> = resolvePackages(
+        listOf(
             Intent(Intent.ACTION_DIAL),
             Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MESSAGING),
             Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")),
             Intent(MediaStore.ACTION_IMAGE_CAPTURE)
         )
-        return intents.mapNotNull {
-            packageManager.resolveActivity(it, PackageManager.MATCH_DEFAULT_ONLY)
-                ?.activityInfo?.packageName
-        }.distinct()
-    }
+    )
 
     private fun dockPackages(): List<String> {
-        val saved = prefs.getString("dock", null)
-        val pkgs = if (saved != null) {
-            saved.split(",").filter { it.isNotEmpty() }
-        } else {
-            defaultDock()
-        }
+        val pkgs = loadList("dock") ?: defaultDock()
         // Hanya yang benar-benar terpasang dan punya ikon launcher
-        return pkgs.filter { p -> allApps.any { it.packageName == p } }.take(5)
-    }
-
-    private fun saveDock(list: List<String>) {
-        prefs.edit().putString("dock", list.joinToString(",")).apply()
+        return pkgs.filter { p -> allApps.any { it.packageName == p } }.take(MAX_DOCK)
     }
 
     private fun renderDock() {
         dock.removeAllViews()
-        val size = dp(52)
-        val gap = dp(10)
+        val size = dp(60)
         dockPackages()
             .mapNotNull { pkg -> allApps.find { it.packageName == pkg } }
             .forEach { app ->
+                val cell = FrameLayout(this)
+                cell.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+
                 val iv = ImageView(this)
-                // Pakai salinan ikon supaya tidak bentrok dengan ikon di app drawer
-                val icon = app.icon.constantState?.newDrawable()?.mutate() ?: app.icon
-                iv.setImageDrawable(icon)
-                val lp = LinearLayout.LayoutParams(size, size)
-                lp.setMargins(gap, 0, gap, 0)
-                iv.layoutParams = lp
+                iv.setImageDrawable(app.icon.constantState?.newDrawable(resources) ?: app.icon)
+                iv.layoutParams = FrameLayout.LayoutParams(size, size, Gravity.CENTER)
+                iv.applyIosCorners()
+                iv.pressEffect()
                 iv.setOnClickListener { launch(app) }
                 iv.setOnLongClickListener {
                     removeFromDock(app)
                     true
                 }
-                dock.addView(iv)
+                cell.addView(iv)
+                dock.addView(cell)
             }
     }
 
@@ -399,16 +457,16 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Sudah ada di dock", Toast.LENGTH_SHORT).show()
             return
         }
-        if (current.size >= 5) {
+        if (current.size >= MAX_DOCK) {
             Toast.makeText(
                 this,
-                "Dock penuh (maks. 5). Tahan ikon di dock untuk menghapus.",
+                "Dock penuh (maks. $MAX_DOCK). Tahan ikon di dock untuk menghapus.",
                 Toast.LENGTH_LONG
             ).show()
             return
         }
         current.add(app.packageName)
-        saveDock(current)
+        saveList("dock", current)
         renderDock()
         Toast.makeText(this, "${app.label} ditambahkan ke dock", Toast.LENGTH_SHORT).show()
     }
@@ -416,9 +474,61 @@ class MainActivity : Activity() {
     private fun removeFromDock(app: AppInfo) {
         val current = dockPackages().toMutableList()
         current.remove(app.packageName)
-        saveDock(current)
+        saveList("dock", current)
         renderDock()
         Toast.makeText(this, "${app.label} dihapus dari dock", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------------------------------------------------------------- layar utama
+
+    private fun defaultHome(): List<String> {
+        val cats = listOf(
+            Intent.CATEGORY_APP_GALLERY,
+            Intent.CATEGORY_APP_CALENDAR,
+            Intent.CATEGORY_APP_CALCULATOR,
+            Intent.CATEGORY_APP_MAPS,
+            Intent.CATEGORY_APP_MUSIC,
+            Intent.CATEGORY_APP_MARKET
+        )
+        val intents = cats.map { Intent(Intent.ACTION_MAIN).addCategory(it) } +
+            Intent(Settings.ACTION_SETTINGS)
+        return resolvePackages(intents)
+    }
+
+    private fun homePackages(): List<String> {
+        val pkgs = loadList("home") ?: defaultHome()
+        return pkgs.filter { p -> allApps.any { it.packageName == p } }.take(MAX_HOME)
+    }
+
+    private fun renderHome() {
+        homeAdapter.submit(homePackages().mapNotNull { pkg -> allApps.find { it.packageName == pkg } })
+    }
+
+    private fun addToHome(app: AppInfo) {
+        val current = homePackages().toMutableList()
+        if (app.packageName in current) {
+            Toast.makeText(this, "Sudah ada di layar utama", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (current.size >= MAX_HOME) {
+            Toast.makeText(
+                this,
+                "Layar utama penuh (maks. $MAX_HOME). Tahan ikon untuk menghapus.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        current.add(app.packageName)
+        saveList("home", current)
+        renderHome()
+        Toast.makeText(this, "${app.label} ditambahkan ke layar utama", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun removeFromHome(app: AppInfo) {
+        val current = homePackages().toMutableList()
+        current.remove(app.packageName)
+        saveList("home", current)
+        renderHome()
     }
 
     // ---------------------------------------------------------------- util

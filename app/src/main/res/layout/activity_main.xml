@@ -11,29 +11,47 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <TextClock
-            android:id="@+id/clock"
-            android:layout_width="wrap_content"
+        <!-- Widget jam bergaya kaca -->
+        <LinearLayout
+            android:id="@+id/widget"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="56dp"
-            android:fontFamily="sans-serif-light"
-            android:format12Hour="HH:mm"
-            android:format24Hour="HH:mm"
-            android:shadowColor="#66000000"
-            android:shadowRadius="8"
-            android:textColor="@color/white"
-            android:textSize="72sp" />
+            android:layout_marginTop="28dp"
+            android:background="@drawable/bg_widget"
+            android:orientation="vertical"
+            android:paddingHorizontal="22dp"
+            android:paddingVertical="18dp">
 
-        <TextClock
-            android:id="@+id/date"
-            android:layout_width="wrap_content"
+            <TextClock
+                android:id="@+id/date"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:format12Hour="EEEE, d MMMM"
+                android:format24Hour="EEEE, d MMMM"
+                android:textAllCaps="true"
+                android:textColor="@color/white_soft"
+                android:textSize="13sp" />
+
+            <TextClock
+                android:id="@+id/clock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-thin"
+                android:format12Hour="HH:mm"
+                android:format24Hour="HH:mm"
+                android:includeFontPadding="false"
+                android:textColor="@color/white"
+                android:textSize="68sp" />
+        </LinearLayout>
+
+        <!-- Ikon aplikasi di layar utama -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/homeRecycler"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:format12Hour="EEEE, d MMMM"
-            android:format24Hour="EEEE, d MMMM"
-            android:shadowColor="#66000000"
-            android:shadowRadius="6"
-            android:textColor="@color/white_soft"
-            android:textSize="16sp" />
+            android:layout_marginTop="20dp"
+            android:clipToPadding="false" />
 
         <View
             android:layout_width="match_parent"
@@ -48,23 +66,22 @@
             android:textColor="@color/white_soft"
             android:textSize="12sp" />
 
+        <!-- Dock kaca -->
         <LinearLayout
             android:id="@+id/dock"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
             android:layout_marginTop="12dp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="10dp"
             android:background="@drawable/bg_dock"
             android:gravity="center"
-            android:minHeight="76dp"
-            android:minWidth="120dp"
+            android:minHeight="92dp"
             android:orientation="horizontal"
             android:paddingHorizontal="8dp"
-            android:paddingVertical="12dp" />
+            android:paddingVertical="16dp" />
     </LinearLayout>
 
-    <!-- ============ APP DRAWER ============ -->
+    <!-- ============ PUSTAKA APLIKASI ============ -->
     <LinearLayout
         android:id="@+id/drawerLayer"
         android:layout_width="match_parent"
@@ -75,27 +92,38 @@
         android:orientation="vertical"
         android:visibility="gone">
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="@string/drawer_title"
+            android:textColor="@color/white"
+            android:textSize="28sp" />
+
         <EditText
             android:id="@+id/searchInput"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="12dp"
+            android:layout_height="46dp"
+            android:layout_marginTop="14dp"
             android:background="@drawable/bg_search"
+            android:drawablePadding="10dp"
+            android:drawableStart="@drawable/ic_search"
             android:hint="@string/hint_search"
             android:imeOptions="actionGo"
             android:importantForAutofill="no"
             android:inputType="text"
             android:maxLines="1"
-            android:paddingHorizontal="20dp"
+            android:paddingHorizontal="16dp"
             android:textColor="@color/white"
             android:textColorHint="@color/white_soft"
-            android:textSize="15sp" />
+            android:textSize="16sp" />
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recycler"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="14dp"
             android:layout_weight="1"
             android:clipToPadding="false"
             android:paddingBottom="16dp" />

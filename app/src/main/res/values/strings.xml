@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GT Launcher</string>
-    <string name="hint_swipe">Geser ke atas untuk semua aplikasi</string>
+    <string name="hint_swipe">Geser ke atas untuk Pustaka Aplikasi</string>
     <string name="hint_search">Cari aplikasi</string>
+    <string name="drawer_title">Pustaka Aplikasi</string>
 </resources>
