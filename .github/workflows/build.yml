@@ -19,8 +19,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Pasang Android SDK
-        uses: android-actions/setup-android@v3
+      # Android SDK sudah ada di server GitHub, cukup pastikan lisensinya diterima
+      - name: Terima lisensi Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - name: Pasang Gradle
         uses: gradle/actions/setup-gradle@v4
