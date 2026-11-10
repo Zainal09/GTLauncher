@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="white">#FFFFFFFF</color>
+    <color name="white_soft">#B3FFFFFF</color>
+    <color name="drawer_scrim">#E6101018</color>
+    <color name="dock_bg">#33FFFFFF</color>
+    <color name="search_bg">#26FFFFFF</color>
+    <color name="ic_launcher_background">#101018</color>
+</resources>
