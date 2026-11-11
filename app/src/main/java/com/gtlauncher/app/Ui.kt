@@ -5,27 +5,19 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Outline
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewOutlineProvider
 
 /** Rasio sudut ikon iOS (sekitar 22,37% dari lebar). */
 const val ICON_RADIUS_RATIO = 0.2237f
-
-/** Potong view jadi kotak bersudut membulat ala ikon iOS. */
-fun View.applyIosCorners() {
-    outlineProvider = object : ViewOutlineProvider() {
-        override fun getOutline(view: View, outline: Outline) {
-            outline.setRoundRect(0, 0, view.width, view.height, view.width * ICON_RADIUS_RATIO)
-        }
-    }
-    clipToOutline = true
-}
 
 /** Efek mengecil sedikit saat disentuh, seperti ikon iOS. */
 @SuppressLint("ClickableViewAccessibility")
@@ -42,12 +34,13 @@ fun View.pressEffect() {
 }
 
 /**
- * Ubah ikon apa pun (bulat, kotak, adaptive) jadi bitmap persegi penuh,
- * supaya semua ikon seragam setelah dipotong bersudut iOS.
+ * Ubah ikon apa pun (bulat, kotak, adaptive) jadi bitmap kotak bersudut membulat ala iOS.
+ * Pembulatan dilakukan SEKALI di sini, jadi saat scroll GPU cukup menggambar bitmap biasa
+ * (tanpa clip per ikon) dan scroll jauh lebih mulus.
  */
 fun Drawable.toIosBitmapDrawable(context: Context, sizePx: Int = 192): Drawable {
-    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bmp)
+    val content = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(content)
     val d = this
     if (d is AdaptiveIconDrawable) {
         // Layer adaptive berukuran 108dp, area terlihat 72dp -> perbesar 1,5x agar area terlihat memenuhi bitmap
@@ -68,5 +61,15 @@ fun Drawable.toIosBitmapDrawable(context: Context, sizePx: Int = 192): Drawable 
         d.setBounds(inset, inset, sizePx - inset, sizePx - inset)
         d.draw(canvas)
     }
-    return BitmapDrawable(context.resources, bmp)
+
+    // Potong jadi kotak membulat yang halus (anti-alias)
+    val out = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val oc = Canvas(out)
+    val radius = sizePx * ICON_RADIUS_RATIO
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    oc.drawRoundRect(RectF(0f, 0f, sizePx.toFloat(), sizePx.toFloat()), radius, radius, paint)
+    paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+    oc.drawBitmap(content, 0f, 0f, paint)
+    content.recycle()
+    return BitmapDrawable(context.resources, out)
 }

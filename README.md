@@ -4,13 +4,27 @@ Launcher Android sederhana (Kotlin + XML, tanpa Compose) yang dibuild otomatis o
 Cocok ditulis di laptop spek rendah: laptop cuma dipakai menulis kode, server GitHub yang membuild APK.
 
 ## Fitur
-- Tema bergaya iOS: ikon squircle seragam, widget jam kaca, ikon di layar utama (maks. 12)
-- Dock 4 aplikasi bergaya kaca (tahan ikon di dock untuk menghapus)
-- Geser ke atas: Pustaka Aplikasi (grid 4 kolom, pencarian, blur latar di Android 12+)
-- Tombol Go di keyboard membuka hasil pencarian teratas
-- Tahan aplikasi di drawer: tambah ke dock, info aplikasi, copot pemasangan
-- Tahan area kosong di layar utama: ganti wallpaper
-- Daftar aplikasi otomatis diperbarui saat ada yang dipasang atau dihapus
+- Tema bergaya iOS: ikon squircle seragam, widget jam kaca, dock kaca 4 ikon
+- Layar utama bisa di-scroll; ikon aplikasi pilihan sendiri (maks. 12)
+- Widget Android dari aplikasi lain (cuaca, kalender, dll.): tahan area kosong > Tambah widget / Hapus widget
+- Pustaka Aplikasi: geser ke atas; grid, pencarian, tombol Go membuka hasil teratas
+- Geser ke bawah di layar utama: panel notifikasi
+- Tahan aplikasi di Pustaka: tambah ke layar utama / dock, sembunyikan, info, copot
+- Ketuk widget jam: buka aplikasi jam
+- Animasi: aplikasi membesar dari ikon saat dibuka, layar utama memudar masuk saat kembali
+- Pengaturan (tahan area kosong > Pengaturan launcher): ukuran ikon, kolom 4/5, nama aplikasi, warna nama,
+  widget jam (tampil, 12/24 jam, tanggal, warna), transparansi kaca, paksa refresh rate tertinggi,
+  aplikasi tersembunyi, atur ulang, jadikan launcher default
+
+## Belum ada (menyusul)
+Folder, banyak halaman layar utama, seret ikon untuk mengatur posisi, ubah ukuran widget, badge notifikasi,
+icon pack, gesture ketuk dua kali untuk kunci layar, backup pengaturan.
+
+## Pembaruan otomatis dengan Obtainium
+Setiap `git push` ke branch main membuat GitHub Release baru berisi APK (versi naik sendiri, mis. 1.3.7).
+1. Pasang **Obtainium** di HP (unduh APK-nya dari https://github.com/ImranR98/Obtainium/releases).
+2. Buka Obtainium, ketuk **Add App**, tempel alamat repo `https://github.com/USERNAME/GTLauncher`, lalu **Add**.
+3. Pasang GT Launcher lewat Obtainium. Setelah itu, versi baru muncul sebagai pembaruan, tinggal ketuk **Update**.
 
 ## Cara pakai (sekali setup)
 
@@ -35,7 +49,7 @@ git push -u origin main
 ### 3. Ambil APK
 1. Buka repo di GitHub, tab **Actions**
 2. Klik run **Build APK** yang paling atas, tunggu centang hijau (sekitar 3-8 menit)
-3. Di bagian bawah halaman run, bagian **Artifacts**, unduh `GTLauncher-debug-apk` (berisi file zip, ekstrak untuk mendapat `app-debug.apk`)
+3. Di bagian bawah halaman run, bagian **Artifacts**, unduh `GTLauncher-release-apk` (berisi file zip, ekstrak untuk mendapat `app-release.apk`)
 4. Kirim ke HP, buka, izinkan "pasang dari sumber ini", lalu pasang
 
 ### 4. Jadikan launcher
@@ -64,10 +78,10 @@ app/src/main/res/values/                     <- warna, teks, tema
 ```
 
 ## Kalau build gagal
-Buka run yang merah di tab Actions, klik langkah **Build APK debug**, salin pesan error
+Buka run yang merah di tab Actions, klik langkah **Build APK release**, salin pesan error
 (baris yang mengandung `error:` atau `e: file://...`), lalu tanyakan ke Claude.
 
 ## Catatan
 - Tidak ada Gradle wrapper di proyek ini; workflow memasang Gradle 8.9 sendiri.
 - Kalau HP menutup launcher di latar belakang, atur baterai GT Launcher ke **Tanpa batasan**.
-- Hasilnya APK debug (ditandatangani kunci debug otomatis), cukup untuk pemakaian pribadi.
+- Hasilnya APK release (ditandatangani kunci tetap di app/launcher.keystore), cukup untuk pemakaian pribadi.

@@ -5,6 +5,10 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+# Izin untuk membuat GitHub Release (dipakai Obtainium untuk memantau versi baru)
+permissions:
+  contents: write
+
 jobs:
   build:
     # Dikunci ke Ubuntu 24.04 supaya build tidak berubah saat "ubuntu-latest" pindah versi
@@ -28,12 +32,31 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build APK debug
-        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Build APK release
+        run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Unggah APK
+      - name: Siapkan nama dan nomor versi
+        id: ver
+        run: |
+          BASE=$(grep '^APP_VERSION=' gradle.properties | cut -d= -f2)
+          VERSION="${BASE}.${GITHUB_RUN_NUMBER}"
+          cp app/build/outputs/apk/release/app-release.apk "GTLauncher-v${VERSION}.apk"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Unggah APK (cadangan di tab Actions)
         uses: actions/upload-artifact@v4
         with:
-          name: GTLauncher-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: GTLauncher-release-apk
+          path: GTLauncher-v${{ steps.ver.outputs.version }}.apk
           retention-days: 30
+
+      - name: Buat GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.version }}" \
+            "GTLauncher-v${{ steps.ver.outputs.version }}.apk" \
+            --target "${{ github.sha }}" \
+            --title "GT Launcher v${{ steps.ver.outputs.version }}" \
+            --notes "Build otomatis dari commit ${{ github.sha }}"

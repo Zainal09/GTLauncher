@@ -2,7 +2,7 @@
 <resources>
     <color name="white">#FFFFFFFF</color>
     <color name="white_soft">#CCFFFFFF</color>
-    <color name="drawer_scrim">#99000000</color>
+    <color name="drawer_scrim">#D90E0E14</color>
     <color name="glass_fill">#38FFFFFF</color>
     <color name="glass_stroke">#59FFFFFF</color>
     <color name="search_bg">#33FFFFFF</color>

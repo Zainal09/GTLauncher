@@ -3,6 +3,8 @@
 
     <!-- Supaya launcher bisa melihat semua aplikasi terpasang -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Geser turun di layar utama untuk membuka panel notifikasi -->
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <!-- Supaya fitur "Copot pemasangan" jalan -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 

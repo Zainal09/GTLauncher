@@ -11,56 +11,77 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Widget jam bergaya kaca -->
-        <LinearLayout
-            android:id="@+id/widget"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:background="@drawable/bg_widget"
-            android:orientation="vertical"
-            android:paddingHorizontal="22dp"
-            android:paddingVertical="18dp">
-
-            <TextClock
-                android:id="@+id/date"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="sans-serif-medium"
-                android:format12Hour="EEEE, d MMMM"
-                android:format24Hour="EEEE, d MMMM"
-                android:textAllCaps="true"
-                android:textColor="@color/white_soft"
-                android:textSize="13sp" />
-
-            <TextClock
-                android:id="@+id/clock"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="sans-serif-thin"
-                android:format12Hour="HH:mm"
-                android:format24Hour="HH:mm"
-                android:includeFontPadding="false"
-                android:textColor="@color/white"
-                android:textSize="68sp" />
-        </LinearLayout>
-
-        <!-- Ikon aplikasi di layar utama -->
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/homeRecycler"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:clipToPadding="false" />
-
-        <View
+        <ScrollView
+            android:id="@+id/homeScroll"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1" />
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/homeContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Widget jam bergaya kaca -->
+                <LinearLayout
+                    android:id="@+id/widget"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:background="@drawable/bg_widget"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="22dp"
+                    android:paddingVertical="18dp">
+
+                    <TextClock
+                        android:id="@+id/date"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium"
+                        android:format12Hour="EEEE, d MMMM"
+                        android:format24Hour="EEEE, d MMMM"
+                        android:textAllCaps="true"
+                        android:textColor="@color/white_soft"
+                        android:textSize="13sp" />
+
+                    <TextClock
+                        android:id="@+id/clock"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-thin"
+                        android:format12Hour="HH:mm"
+                        android:format24Hour="HH:mm"
+                        android:includeFontPadding="false"
+                        android:textColor="@color/white"
+                        android:textSize="68sp" />
+                </LinearLayout>
+
+                <!-- Widget dari aplikasi lain (cuaca, kalender, dll.) -->
+                <LinearLayout
+                    android:id="@+id/widgetContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <!-- Ikon aplikasi di layar utama -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/homeRecycler"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:clipToPadding="false" />
+            </LinearLayout>
+        </ScrollView>
 
         <TextView
+            android:id="@+id/hint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
             android:gravity="center"
             android:text="@string/hint_swipe"
             android:textColor="@color/white_soft"
@@ -71,7 +92,7 @@
             android:id="@+id/dock"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="10dp"
             android:layout_marginBottom="10dp"
             android:background="@drawable/bg_dock"
             android:gravity="center"
