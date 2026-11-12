@@ -1780,4 +1780,14 @@ class MainActivity : Activity() {
     // ================================================================ util
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    /**
+     * Mengembalikan daftar nama paket yang terpasang dan dapat menangani daftar intent yang diberikan.
+     * Dipakai untuk menentukan dock dan layar utama bawaan.
+     */
+    private fun resolvePackages(intents: List<Intent>): List<String> =
+        intents.mapNotNull { intent ->
+            packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        }.distinct()
 }
