@@ -38,14 +38,15 @@ fun View.pressEffect() {
  * Pembulatan dilakukan SEKALI di sini, jadi saat scroll GPU cukup menggambar bitmap biasa
  * (tanpa clip per ikon) dan scroll jauh lebih mulus.
  */
-fun Drawable.toIosBitmapDrawable(context: Context, sizePx: Int = 192): Drawable {
-    val content = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+fun Drawable.toIosBitmapDrawable(context: Context, sizePx: Int = 0): Drawable {
+    val targetPx = if (sizePx > 0) sizePx else (72 * context.resources.displayMetrics.density).toInt().coerceAtLeast(192)
+    val content = Bitmap.createBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(content)
     val d = this
     if (d is AdaptiveIconDrawable) {
         // Layer adaptive berukuran 108dp, area terlihat 72dp -> perbesar 1,5x agar area terlihat memenuhi bitmap
-        val pad = (sizePx * 0.25f).toInt()
-        val bounds = Rect(-pad, -pad, sizePx + pad, sizePx + pad)
+        val pad = (targetPx * 0.25f).toInt()
+        val bounds = Rect(-pad, -pad, targetPx + pad, targetPx + pad)
         d.background?.let {
             it.bounds = bounds
             it.draw(canvas)
@@ -57,17 +58,17 @@ fun Drawable.toIosBitmapDrawable(context: Context, sizePx: Int = 192): Drawable 
     } else {
         // Ikon biasa: beri latar terang lembut lalu gambar di tengah
         canvas.drawColor(Color.parseColor("#F2F2F7"))
-        val inset = (sizePx * 0.14f).toInt()
-        d.setBounds(inset, inset, sizePx - inset, sizePx - inset)
+        val inset = (targetPx * 0.14f).toInt()
+        d.setBounds(inset, inset, targetPx - inset, targetPx - inset)
         d.draw(canvas)
     }
 
     // Potong jadi kotak membulat yang halus (anti-alias)
-    val out = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val out = Bitmap.createBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888)
     val oc = Canvas(out)
-    val radius = sizePx * ICON_RADIUS_RATIO
+    val radius = targetPx * ICON_RADIUS_RATIO
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    oc.drawRoundRect(RectF(0f, 0f, sizePx.toFloat(), sizePx.toFloat()), radius, radius, paint)
+    oc.drawRoundRect(RectF(0f, 0f, targetPx.toFloat(), targetPx.toFloat()), radius, radius, paint)
     paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
     oc.drawBitmap(content, 0f, 0f, paint)
     content.recycle()

@@ -5,20 +5,22 @@ Cocok ditulis di laptop spek rendah: laptop cuma dipakai menulis kode, server Gi
 
 ## Fitur
 - Tema bergaya iOS: ikon squircle seragam, widget jam kaca, dock kaca 4 ikon
-- Layar utama bisa di-scroll; ikon aplikasi pilihan sendiri (maks. 12)
+- Banyak halaman layar utama geser horizontal dengan titik indikator (dots indicator)
+- Ukuran grid bebas: 4x4, 4x5, 4x6, 5x5, 5x6, 6x6, hingga 6x7
+- Kunci tata letak (mencegah perubahan/penghapusan tidak sengaja)
+- Aplikasi baru otomatis dialokasikan ke sel/halaman kosong
 - Widget Android dari aplikasi lain (cuaca, kalender, dll.): tahan area kosong > Tambah widget / Hapus widget
 - Pustaka Aplikasi: geser ke atas; grid, pencarian, tombol Go membuka hasil teratas
 - Geser ke bawah di layar utama: panel notifikasi
 - Tahan aplikasi di Pustaka: tambah ke layar utama / dock, sembunyikan, info, copot
 - Ketuk widget jam: buka aplikasi jam
 - Animasi: aplikasi membesar dari ikon saat dibuka, layar utama memudar masuk saat kembali
-- Pengaturan (tahan area kosong > Pengaturan launcher): ukuran ikon, kolom 4/5, nama aplikasi, warna nama,
+- Pengaturan (tahan area kosong > Pengaturan launcher): ukuran ikon, grid, kunci tata letak, kelola halaman, nama aplikasi, warna nama,
   widget jam (tampil, 12/24 jam, tanggal, warna), transparansi kaca, paksa refresh rate tertinggi,
   aplikasi tersembunyi, atur ulang, jadikan launcher default
 
-## Belum ada (menyusul)
-Folder, banyak halaman layar utama, seret ikon untuk mengatur posisi, ubah ukuran widget, badge notifikasi,
-icon pack, gesture ketuk dua kali untuk kunci layar, backup pengaturan.
+## Sedang dikembangkan (Fase berikutnya)
+Folder, mode edit ala iOS (ikon bergoyang/jiggle + tombol minus), drag and drop ikon & dock, ubah ukuran widget bebas, App Library kategori otomatis.
 
 ## Pembaruan otomatis dengan Obtainium
 Setiap `git push` ke branch main membuat GitHub Release baru berisi APK (versi naik sendiri, mis. 1.3.7).

@@ -38,7 +38,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextClock
 import android.widget.TextView
 import android.widget.Toast
@@ -47,19 +46,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-
-/** Grid yang tidak bisa di-scroll sendiri (scroll-nya diurus ScrollView layar utama). */
-private class FixedGridLayoutManager(context: Context, span: Int) : GridLayoutManager(context, span) {
-    override fun canScrollVertically(): Boolean = false
-}
 
 class MainActivity : Activity() {
 
     private companion object {
         const val MAX_DOCK = 4
-        const val MAX_HOME = 12
         const val HOST_ID = 1024
         const val REQ_BIND = 4001
         const val REQ_CONFIGURE = 4002
@@ -68,14 +62,12 @@ class MainActivity : Activity() {
     // ---- tampilan
     private lateinit var root: View
     private lateinit var homeLayer: View
-    private lateinit var homeScroll: ScrollView
-    private lateinit var homeContent: View
     private lateinit var widget: LinearLayout
     private lateinit var clockView: TextClock
     private lateinit var dateView: TextClock
     private lateinit var hintView: TextView
-    private lateinit var widgetContainer: LinearLayout
-    private lateinit var homeRecycler: RecyclerView
+    private lateinit var homePager: ViewPager2
+    private lateinit var pageIndicator: PageIndicatorDotsView
     private lateinit var dock: LinearLayout
     private lateinit var drawerLayer: View
     private lateinit var searchInput: EditText
@@ -84,7 +76,7 @@ class MainActivity : Activity() {
     // ---- data dan pengaturan
     private lateinit var cfg: LauncherPrefs
     private lateinit var drawerAdapter: AppAdapter
-    private lateinit var homeAdapter: AppAdapter
+    private lateinit var homePagerAdapter: HomePageAdapter
     private lateinit var flingDetector: GestureDetector
     private lateinit var appWidgetManager: AppWidgetManager
     private lateinit var appWidgetHost: AppWidgetHost
@@ -98,6 +90,8 @@ class MainActivity : Activity() {
     private var allAppsRaw: List<AppInfo> = emptyList()
     private var allApps: List<AppInfo> = emptyList()
     private var filtered: List<AppInfo> = emptyList()
+    private var homeItems: MutableList<LauncherItem> = mutableListOf()
+
     private var drawerOpen = false
     private var receiverRegistered = false
     private var returnAnim = false
@@ -105,11 +99,20 @@ class MainActivity : Activity() {
 
     private val packageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            // Aplikasi yang diperbarui atau dihapus: buang ikon lamanya dari cache
+            val action = intent?.action
             val pkg = intent?.data?.schemeSpecificPart
             if (pkg != null) {
                 iconCache.keys.toList().forEach { key ->
                     if (key.startsWith("$pkg/")) iconCache.remove(key)
+                }
+
+                if (action == Intent.ACTION_PACKAGE_REMOVED && !intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                    // Hapus dari layar utama jika aplikasi dicopot
+                    homeItems.removeAll { it.type == ItemType.APP && it.packageName == pkg }
+                    cfg.setHomeItems(homeItems)
+                } else if (action == Intent.ACTION_PACKAGE_ADDED && !intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                    // Aplikasi baru terpasang: masukkan otomatis ke sel kosong
+                    onNewPackageAdded(pkg)
                 }
             }
             loadApps()
@@ -132,14 +135,12 @@ class MainActivity : Activity() {
 
         root = findViewById(R.id.root)
         homeLayer = findViewById(R.id.homeLayer)
-        homeScroll = findViewById(R.id.homeScroll)
-        homeContent = findViewById(R.id.homeContent)
         widget = findViewById(R.id.widget)
         clockView = findViewById(R.id.clock)
         dateView = findViewById(R.id.date)
         hintView = findViewById(R.id.hint)
-        widgetContainer = findViewById(R.id.widgetContainer)
-        homeRecycler = findViewById(R.id.homeRecycler)
+        homePager = findViewById(R.id.homePager)
+        pageIndicator = findViewById(R.id.pageIndicator)
         dock = findViewById(R.id.dock)
         drawerLayer = findViewById(R.id.drawerLayer)
         searchInput = findViewById(R.id.searchInput)
@@ -166,23 +167,26 @@ class MainActivity : Activity() {
         recycler.itemAnimator = null
         recycler.setItemViewCacheSize(24)
 
-        // Ikon di layar utama
-        homeAdapter = AppAdapter(
-            onClick = { app, view -> launch(app, view) },
-            onLongClick = { app, _ -> showAppMenu(app, fromHome = true) }
+        // Multi-page adapter layar utama
+        homePagerAdapter = HomePageAdapter(
+            getColumns = { cfg.columns },
+            getRows = { cfg.rows },
+            getItemsForPage = { page -> homeItems.filter { it.page == page } },
+            getAppInfo = { item -> allApps.find { it.packageName == item.packageName } },
+            onItemClick = { _, app, view -> launch(app, view) },
+            onItemLongClick = { item, app, _ -> showHomeItemMenu(item, app) },
+            onPageLongClick = { _ -> showHomeMenu() },
+            onWidgetCreateView = { wid -> createWidgetView(wid) },
+            getIconPx = { dp(cfg.iconSizeDp) },
+            getShowLabels = { cfg.showLabels },
+            getLabelColor = { LauncherPrefs.LABEL_COLORS[cfg.labelColorIndex] }
         )
-        homeRecycler.layoutManager = FixedGridLayoutManager(this, cfg.columns)
-        homeRecycler.adapter = homeAdapter
-        homeRecycler.itemAnimator = null
-        homeRecycler.isNestedScrollingEnabled = false
+        homePager.adapter = homePagerAdapter
+        pageIndicator.attachToViewPager(homePager)
 
         // Ketuk widget jam -> buka aplikasi jam. Tahan area kosong -> menu layar utama.
         widget.setOnClickListener { openClockApp() }
         widget.setOnLongClickListener {
-            showHomeMenu()
-            true
-        }
-        homeContent.setOnLongClickListener {
             showHomeMenu()
             true
         }
@@ -194,7 +198,6 @@ class MainActivity : Activity() {
         setupGestures()
         setupSearch()
         applyStyles()
-        renderWidgets()
     }
 
     override fun onStart() {
@@ -267,13 +270,15 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        // Tombol Home ditekan saat launcher sudah terbuka -> kembali ke layar utama paling atas
+        // Tombol Home ditekan saat launcher sudah terbuka -> kembali ke halaman 0 dan tutup drawer
         if (intent != null &&
             intent.action == Intent.ACTION_MAIN &&
             intent.hasCategory(Intent.CATEGORY_HOME)
         ) {
             closeDrawer()
-            homeScroll.smoothScrollTo(0, 0)
+            if (::homePager.isInitialized && homePager.currentItem != 0) {
+                homePager.setCurrentItem(0, true)
+            }
         }
     }
 
@@ -296,7 +301,7 @@ class MainActivity : Activity() {
                 if (e1 == null) return false
                 val dy = e2.y - e1.y
                 val dx = e2.x - e1.x
-                if (Math.abs(dy) < Math.abs(dx)) return false // geseran mendatar, abaikan
+                if (Math.abs(dy) < Math.abs(dx)) return false // geseran mendatar (diurus ViewPager2)
 
                 if (drawerOpen) {
                     // Geser cepat ke bawah saat daftar sudah di paling atas -> tutup
@@ -308,17 +313,13 @@ class MainActivity : Activity() {
                 }
 
                 if (velocityY < -1200f && dy < -dp(80)) {
-                    // Geser ke atas: buka Pustaka Aplikasi (dari dock, atau kalau layar utama sudah di dasar)
-                    if (isInside(dock, e1.x, e1.y) || !homeScroll.canScrollVertically(1)) {
-                        openDrawer()
-                        return true
-                    }
+                    // Geser ke atas: buka Pustaka Aplikasi
+                    openDrawer()
+                    return true
                 } else if (velocityY > 1500f && dy > dp(80)) {
-                    // Geser ke bawah di layar utama paling atas: panel notifikasi
-                    if (!homeScroll.canScrollVertically(-1)) {
-                        expandNotifications()
-                        return true
-                    }
+                    // Geser ke bawah di layar utama: panel notifikasi
+                    expandNotifications()
+                    return true
                 }
                 return false
             }
@@ -328,12 +329,6 @@ class MainActivity : Activity() {
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (::flingDetector.isInitialized) flingDetector.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
-    }
-
-    private fun isInside(v: View, x: Float, y: Float): Boolean {
-        val r = Rect()
-        if (!v.getGlobalVisibleRect(r)) return false
-        return r.contains(x.toInt(), y.toInt())
     }
 
     private fun expandNotifications() {
@@ -372,24 +367,35 @@ class MainActivity : Activity() {
             val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             val raw = pm.queryIntentActivities(query, 0)
                 .filter { it.activityInfo.packageName != packageName }
-                .map {
-                    val comp = ComponentName(it.activityInfo.packageName, it.activityInfo.name)
-                    val key = comp.flattenToString()
-                    // Pakai ikon dari cache kalau ada; hanya aplikasi baru yang diproses
-                    val icon = iconCache[key] ?: it.loadIcon(pm).toIosBitmapDrawable(this).also { d ->
-                        iconCache[key] = d
+                .mapNotNull { resolveInfo ->
+                    try {
+                        val comp = ComponentName(resolveInfo.activityInfo.packageName, resolveInfo.activityInfo.name)
+                        val key = comp.flattenToString()
+                        val icon = iconCache[key] ?: try {
+                            resolveInfo.loadIcon(pm).toIosBitmapDrawable(this@MainActivity)
+                        } catch (e: Exception) {
+                            pm.defaultActivityIcon.toIosBitmapDrawable(this@MainActivity)
+                        }.also { d -> iconCache[key] = d }
+
+                        AppInfo(
+                            label = try {
+                                resolveInfo.loadLabel(pm).toString()
+                            } catch (e: Exception) {
+                                resolveInfo.activityInfo.packageName
+                            },
+                            packageName = resolveInfo.activityInfo.packageName,
+                            component = comp,
+                            icon = icon
+                        )
+                    } catch (e: Exception) {
+                        null
                     }
-                    AppInfo(
-                        label = it.loadLabel(pm).toString(),
-                        packageName = it.activityInfo.packageName,
-                        component = comp,
-                        icon = icon
-                    )
                 }
                 .sortedBy { it.label.lowercase() }
 
             ui.post {
-                // Tidak ada perubahan -> jangan gambar ulang (mencegah kedip saat kembali dari aplikasi)
+                if (isFinishing || isDestroyed) return@post
+
                 val same = raw.size == allAppsRaw.size && raw.indices.all {
                     raw[it].component == allAppsRaw[it].component && raw[it].label == allAppsRaw[it].label
                 }
@@ -401,7 +407,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Hitung ulang daftar yang terlihat (tanpa aplikasi yang disembunyikan) lalu perbarui semua tampilan. */
+    /** Hitung ulang daftar yang terlihat lalu perbarui semua tampilan. */
     private fun rebuildVisible() {
         val hidden = cfg.hidden
         allApps = allAppsRaw.filter { it.packageName !in hidden }
@@ -422,15 +428,12 @@ class MainActivity : Activity() {
 
     // ================================================================ tampilan dan pengaturan
 
-    /** Terapkan semua pengaturan tampilan (ikon, kolom, jam, kaca). Dipanggil saat start dan tiap pengaturan berubah. */
     private fun applyStyles() {
         val iconPx = dp(cfg.iconSizeDp)
         val labelColor = LauncherPrefs.LABEL_COLORS[cfg.labelColorIndex]
 
         drawerAdapter.applyStyle(iconPx, cfg.showLabels, Color.WHITE)
-        homeAdapter.applyStyle(iconPx, cfg.showLabels, labelColor)
         (recycler.layoutManager as GridLayoutManager).spanCount = cfg.columns
-        (homeRecycler.layoutManager as GridLayoutManager).spanCount = cfg.columns
 
         // Teks petunjuk mengikuti warna nama aplikasi
         hintView.setTextColor((labelColor and 0x00FFFFFF) or 0xB3000000.toInt())
@@ -451,13 +454,10 @@ class MainActivity : Activity() {
         (dock.background.mutate() as? GradientDrawable)?.setColor(fill)
 
         renderDock()
+        renderHome()
         applyRefreshRate()
     }
 
-    /**
-     * Minta layar memakai refresh rate tertinggi (mis. 120 Hz) untuk jendela launcher ini.
-     * Tanpa ini, sistem sering membatasi aplikasi pihak ketiga ke 60 Hz atau kurang.
-     */
     @Suppress("DEPRECATION")
     private fun applyRefreshRate() {
         try {
@@ -490,7 +490,6 @@ class MainActivity : Activity() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         try {
             if (source != null && source.width > 0 && source.height > 0) {
-                // Aplikasi "membesar" dari posisi ikon yang diketuk
                 val opts = ActivityOptions.makeScaleUpAnimation(
                     source, 0, 0, source.width, source.height
                 )
@@ -522,7 +521,6 @@ class MainActivity : Activity() {
         drawerLayer.visibility = View.VISIBLE
         drawerLayer.alpha = 0f
         drawerLayer.translationY = dp(60).toFloat()
-        // withLayer(): tampilan digambar sekali ke tekstur GPU lalu cuma digeser/dipudarkan, jauh lebih ringan
         drawerLayer.animate().alpha(1f).translationY(0f).setDuration(220).withLayer().start()
         homeLayer.animate().alpha(0f).setDuration(180).withLayer().start()
     }
@@ -578,7 +576,6 @@ class MainActivity : Activity() {
 
     private fun dockPackages(): List<String> {
         val pkgs = cfg.getList("dock") ?: defaultDock()
-        // Hanya yang benar-benar terpasang, punya ikon launcher, dan tidak disembunyikan
         return pkgs.filter { p -> allApps.any { it.packageName == p } }.take(MAX_DOCK)
     }
 
@@ -633,7 +630,7 @@ class MainActivity : Activity() {
         Toast.makeText(this, "${app.label} dihapus dari dock", Toast.LENGTH_SHORT).show()
     }
 
-    // ================================================================ ikon layar utama
+    // ================================================================ halaman layar utama
 
     private fun defaultHome(): List<String> {
         val cats = listOf(
@@ -649,77 +646,166 @@ class MainActivity : Activity() {
         return resolvePackages(intents)
     }
 
-    private fun homePackages(): List<String> {
-        val pkgs = cfg.getList("home") ?: defaultHome()
-        return pkgs.filter { p -> allApps.any { it.packageName == p } }.take(MAX_HOME)
+    private fun renderHome() {
+        if (homeItems.isEmpty()) {
+            homeItems = cfg.migrateOldHomeIfNeeded { defaultHome() }.toMutableList()
+        }
+
+        val maxItemPage = homeItems.maxOfOrNull { it.page } ?: 0
+        val totalPages = maxOf(cfg.pageCount, maxItemPage + 1, 1)
+
+        homePagerAdapter.pageCount = totalPages
+        pageIndicator.pageCount = totalPages
+        homePagerAdapter.notifyDataSetChanged()
     }
 
-    private fun renderHome() {
-        homeAdapter.submit(homePackages().mapNotNull { pkg -> allApps.find { it.packageName == pkg } })
+    /**
+     * Menempatkan aplikasi baru yang baru terpasang di sel kosong pertama.
+     */
+    private fun onNewPackageAdded(pkg: String) {
+        if (pkg in cfg.hidden) return
+        if (homeItems.any { it.type == ItemType.APP && it.packageName == pkg }) return
+
+        val cols = cfg.columns
+        val rows = cfg.rows
+        var targetPage = 0
+        var targetPos: Pair<Int, Int>? = null
+
+        val totalPages = maxOf(cfg.pageCount, (homeItems.maxOfOrNull { it.page } ?: 0) + 1, 1)
+        for (p in 0 until totalPages) {
+            val occupied = Array(cols) { BooleanArray(rows) }
+            homeItems.filter { it.page == p }.forEach { item ->
+                for (x in item.cellX until minOf(cols, item.cellX + item.spanX)) {
+                    for (y in item.cellY until minOf(rows, item.cellY + item.spanY)) {
+                        occupied[x][y] = true
+                    }
+                }
+            }
+            for (y in 0 until rows) {
+                for (x in 0 until cols) {
+                    if (!occupied[x][y]) {
+                        targetPage = p
+                        targetPos = Pair(x, y)
+                        break
+                    }
+                }
+                if (targetPos != null) break
+            }
+            if (targetPos != null) break
+        }
+
+        if (targetPos == null) {
+            targetPage = totalPages
+            targetPos = Pair(0, 0)
+            cfg.pageCount = targetPage + 1
+        }
+
+        homeItems.add(
+            LauncherItem(
+                type = ItemType.APP,
+                page = targetPage,
+                cellX = targetPos.first,
+                cellY = targetPos.second,
+                spanX = 1,
+                spanY = 1,
+                packageName = pkg
+            )
+        )
+        cfg.setHomeItems(homeItems)
     }
 
     private fun addToHome(app: AppInfo) {
-        val current = homePackages().toMutableList()
-        if (app.packageName in current) {
-            Toast.makeText(this, "Sudah ada di layar utama", Toast.LENGTH_SHORT).show()
+        if (cfg.lockLayout) {
+            Toast.makeText(this, "Tata letak terkunci", Toast.LENGTH_SHORT).show()
             return
         }
-        if (current.size >= MAX_HOME) {
-            Toast.makeText(
-                this,
-                "Layar utama penuh (maks. $MAX_HOME). Tahan ikon untuk menghapus.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
+
+        val cols = cfg.columns
+        val rows = cfg.rows
+        var targetPage = homePager.currentItem
+        var targetPos: Pair<Int, Int>? = null
+
+        fun findVacantOnPage(p: Int): Pair<Int, Int>? {
+            val occupied = Array(cols) { BooleanArray(rows) }
+            homeItems.filter { it.page == p }.forEach { item ->
+                for (x in item.cellX until minOf(cols, item.cellX + item.spanX)) {
+                    for (y in item.cellY until minOf(rows, item.cellY + item.spanY)) {
+                        occupied[x][y] = true
+                    }
+                }
+            }
+            for (y in 0 until rows) {
+                for (x in 0 until cols) {
+                    if (!occupied[x][y]) return Pair(x, y)
+                }
+            }
+            return null
         }
-        current.add(app.packageName)
-        cfg.setList("home", current)
+
+        targetPos = findVacantOnPage(targetPage)
+        if (targetPos == null) {
+            val totalPages = maxOf(cfg.pageCount, (homeItems.maxOfOrNull { it.page } ?: 0) + 1, 1)
+            for (p in 0 until totalPages) {
+                if (p == targetPage) continue
+                val pos = findVacantOnPage(p)
+                if (pos != null) {
+                    targetPage = p
+                    targetPos = pos
+                    break
+                }
+            }
+        }
+
+        if (targetPos == null) {
+            targetPage = maxOf(cfg.pageCount, (homeItems.maxOfOrNull { it.page } ?: 0) + 1, 1)
+            targetPos = Pair(0, 0)
+            cfg.pageCount = targetPage + 1
+        }
+
+        homeItems.add(
+            LauncherItem(
+                type = ItemType.APP,
+                page = targetPage,
+                cellX = targetPos.first,
+                cellY = targetPos.second,
+                spanX = 1,
+                spanY = 1,
+                packageName = app.packageName,
+                componentName = app.component.flattenToString()
+            )
+        )
+        cfg.setHomeItems(homeItems)
         renderHome()
-        Toast.makeText(this, "${app.label} ditambahkan ke layar utama", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "${app.label} ditambahkan ke halaman ${targetPage + 1}", Toast.LENGTH_SHORT).show()
     }
 
-    private fun removeFromHome(app: AppInfo) {
-        val current = homePackages().toMutableList()
-        current.remove(app.packageName)
-        cfg.setList("home", current)
+    private fun removeFromHome(item: LauncherItem) {
+        if (cfg.lockLayout) {
+            Toast.makeText(this, "Tata letak terkunci", Toast.LENGTH_SHORT).show()
+            return
+        }
+        homeItems.removeAll { it.id == item.id }
+        cfg.setHomeItems(homeItems)
         renderHome()
+        Toast.makeText(this, "Dihapus dari layar utama", Toast.LENGTH_SHORT).show()
     }
 
     // ================================================================ widget Android
 
-    private fun renderWidgets() {
-        widgetContainer.removeAllViews()
-        val ids = cfg.widgetIds
-        val valid = mutableListOf<Int>()
-        val density = resources.displayMetrics.density
-
-        for (id in ids) {
-            val info = appWidgetManager.getAppWidgetInfo(id)
-            if (info == null) {
-                // Aplikasi widget sudah dihapus
-                appWidgetHost.deleteAppWidgetId(id)
-                continue
-            }
-            valid.add(id)
-
-            val heightPx = info.minHeight.coerceIn(dp(72), dp(360))
-            val hv = appWidgetHost.createView(this, id, info)
+    private fun createWidgetView(widgetId: Int): View? {
+        val info = appWidgetManager.getAppWidgetInfo(widgetId) ?: return null
+        return try {
+            val hv = appWidgetHost.createView(this, widgetId, info)
             hv.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
                     outline.setRoundRect(0, 0, view.width, view.height, dp(22).toFloat())
                 }
             }
             hv.clipToOutline = true
-
-            val wDp = ((resources.displayMetrics.widthPixels - dp(32)) / density).toInt()
-            val hDp = (heightPx / density).toInt()
-            hv.updateAppWidgetSize(null, wDp, hDp, wDp, hDp)
-
-            val params = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPx)
-            params.topMargin = dp(12)
-            widgetContainer.addView(hv, params)
+            hv
+        } catch (e: Exception) {
+            null
         }
-        if (valid.size != ids.size) cfg.widgetIds = valid
     }
 
     private fun showWidgetPicker() {
@@ -756,7 +842,6 @@ class MainActivity : Activity() {
             if (appWidgetManager.bindAppWidgetIdIfAllowed(id, info.provider)) {
                 configureOrFinish(id, info)
             } else {
-                // Minta izin pengguna untuk memasang widget ini
                 val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider)
@@ -781,10 +866,77 @@ class MainActivity : Activity() {
     }
 
     private fun finishAddWidget(id: Int) {
+        val cols = cfg.columns
+        val rows = cfg.rows
+        val spanX = minOf(cols, 4)
+        val spanY = 2
+
+        var targetPage = homePager.currentItem
+        var targetPos: Pair<Int, Int>? = null
+
+        fun findVacantWidgetSpan(p: Int): Pair<Int, Int>? {
+            val occupied = Array(cols) { BooleanArray(rows) }
+            homeItems.filter { it.page == p }.forEach { item ->
+                for (x in item.cellX until minOf(cols, item.cellX + item.spanX)) {
+                    for (y in item.cellY until minOf(rows, item.cellY + item.spanY)) {
+                        occupied[x][y] = true
+                    }
+                }
+            }
+            for (y in 0..(rows - spanY)) {
+                for (x in 0..(cols - spanX)) {
+                    var canFit = true
+                    for (dx in 0 until spanX) {
+                        for (dy in 0 until spanY) {
+                            if (occupied[x + dx][y + dy]) {
+                                canFit = false
+                                break
+                            }
+                        }
+                        if (!canFit) break
+                    }
+                    if (canFit) return Pair(x, y)
+                }
+            }
+            return null
+        }
+
+        targetPos = findVacantWidgetSpan(targetPage)
+        if (targetPos == null) {
+            val totalPages = maxOf(cfg.pageCount, (homeItems.maxOfOrNull { it.page } ?: 0) + 1, 1)
+            for (p in 0 until totalPages) {
+                if (p == targetPage) continue
+                val pos = findVacantWidgetSpan(p)
+                if (pos != null) {
+                    targetPage = p
+                    targetPos = pos
+                    break
+                }
+            }
+        }
+
+        if (targetPos == null) {
+            targetPage = maxOf(cfg.pageCount, (homeItems.maxOfOrNull { it.page } ?: 0) + 1, 1)
+            targetPos = Pair(0, 0)
+            cfg.pageCount = targetPage + 1
+        }
+
+        homeItems.add(
+            LauncherItem(
+                type = ItemType.WIDGET,
+                page = targetPage,
+                cellX = targetPos.first,
+                cellY = targetPos.second,
+                spanX = spanX,
+                spanY = spanY,
+                widgetId = id
+            )
+        )
+        cfg.setHomeItems(homeItems)
         cfg.widgetIds = cfg.widgetIds + id
         pendingWidgetId = -1
-        renderWidgets()
-        Toast.makeText(this, "Widget ditambahkan", Toast.LENGTH_SHORT).show()
+        renderHome()
+        Toast.makeText(this, "Widget ditambahkan ke halaman ${targetPage + 1}", Toast.LENGTH_SHORT).show()
     }
 
     private fun cancelPendingWidget() {
@@ -818,26 +970,35 @@ class MainActivity : Activity() {
     }
 
     private fun showRemoveWidget() {
-        val ids = cfg.widgetIds
-        if (ids.isEmpty()) {
-            Toast.makeText(this, "Belum ada widget", Toast.LENGTH_SHORT).show()
+        val widgetItems = homeItems.filter { it.type == ItemType.WIDGET && it.widgetId != null }
+        if (widgetItems.isEmpty()) {
+            Toast.makeText(this, "Belum ada widget di layar utama", Toast.LENGTH_SHORT).show()
             return
         }
         val pm = packageManager
-        val names = ids.map { id ->
-            appWidgetManager.getAppWidgetInfo(id)?.loadLabel(pm)?.toString() ?: "Widget $id"
+        val names = widgetItems.map { item ->
+            val id = item.widgetId ?: 0
+            val info = appWidgetManager.getAppWidgetInfo(id)
+            val label = info?.loadLabel(pm)?.toString() ?: "Widget"
+            "Hal. ${item.page + 1}: $label"
         }
         AlertDialog.Builder(this)
             .setTitle("Hapus widget")
             .setItems(names.toTypedArray()) { _, which ->
-                val id = ids[which]
-                try {
-                    appWidgetHost.deleteAppWidgetId(id)
-                } catch (e: Exception) {
-                    // abaikan
+                val item = widgetItems[which]
+                val wid = item.widgetId
+                if (wid != null) {
+                    try {
+                        appWidgetHost.deleteAppWidgetId(wid)
+                    } catch (e: Exception) {
+                        // abaikan
+                    }
+                    cfg.widgetIds = cfg.widgetIds - wid
                 }
-                cfg.widgetIds = cfg.widgetIds - id
-                renderWidgets()
+                homeItems.remove(item)
+                cfg.setHomeItems(homeItems)
+                renderHome()
+                Toast.makeText(this, "Widget dihapus", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Batal", null)
             .show()
@@ -849,11 +1010,13 @@ class MainActivity : Activity() {
         val labels = mutableListOf<String>()
         val actions = mutableListOf<() -> Unit>()
 
-        labels.add("Tambah widget")
-        actions.add { showWidgetPicker() }
-        if (cfg.widgetIds.isNotEmpty()) {
-            labels.add("Hapus widget")
-            actions.add { showRemoveWidget() }
+        if (!cfg.lockLayout) {
+            labels.add("Tambah widget")
+            actions.add { showWidgetPicker() }
+            if (homeItems.any { it.type == ItemType.WIDGET }) {
+                labels.add("Hapus widget")
+                actions.add { showRemoveWidget() }
+            }
         }
         labels.add("Ganti wallpaper")
         actions.add { openWallpaperPicker() }
@@ -865,28 +1028,61 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun showHomeItemMenu(item: LauncherItem, app: AppInfo) {
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+
+        if (!cfg.lockLayout) {
+            labels.add("Hapus dari layar utama")
+            actions.add { removeFromHome(item) }
+        }
+        labels.add("Info aplikasi")
+        actions.add {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", app.packageName, null)
+                )
+            )
+        }
+        if (!cfg.lockLayout) {
+            labels.add("Copot pemasangan")
+            actions.add {
+                startActivity(
+                    Intent(Intent.ACTION_DELETE, Uri.fromParts("package", app.packageName, null))
+                )
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(item.customTitle ?: app.label)
+            .setItems(labels.toTypedArray()) { _, which ->
+                try {
+                    actions[which]()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Aksi tidak tersedia", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .show()
+    }
+
     private fun showAppMenu(app: AppInfo, fromHome: Boolean) {
         val labels = mutableListOf<String>()
         val actions = mutableListOf<() -> Unit>()
 
-        if (fromHome) {
-            labels.add("Hapus dari layar utama")
-            actions.add { removeFromHome(app) }
-        } else {
-            labels.add("Tambah ke layar utama")
-            actions.add { addToHome(app) }
-            labels.add("Tambah ke dock")
-            actions.add { addToDock(app) }
-            labels.add("Sembunyikan aplikasi")
-            actions.add {
-                cfg.hidden = cfg.hidden + app.packageName
-                rebuildVisible()
-                Toast.makeText(
-                    this,
-                    "${app.label} disembunyikan (bisa ditampilkan lagi di Pengaturan)",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
+        labels.add("Tambah ke layar utama")
+        actions.add { addToHome(app) }
+        labels.add("Tambah ke dock")
+        actions.add { addToDock(app) }
+        labels.add("Sembunyikan aplikasi")
+        actions.add {
+            cfg.hidden = cfg.hidden + app.packageName
+            rebuildVisible()
+            Toast.makeText(
+                this,
+                "${app.label} disembunyikan (bisa ditampilkan lagi di Pengaturan)",
+                Toast.LENGTH_LONG
+            ).show()
         }
         labels.add("Info aplikasi")
         actions.add {
@@ -944,12 +1140,14 @@ class MainActivity : Activity() {
     private fun showSettings() {
         val items = arrayOf(
             "Ukuran ikon: ${LauncherPrefs.ICON_SIZE_NAMES[cfg.iconSizeIndex]}",
-            "Jumlah kolom: ${cfg.columns}",
+            "Ukuran grid: ${LauncherPrefs.GRID_NAMES[cfg.gridIndex]}",
+            "Kunci tata letak: ${onOff(cfg.lockLayout, "Terkunci", "Terbuka")}",
             "Nama aplikasi: ${onOff(cfg.showLabels, "Tampil", "Sembunyi")}",
             "Warna nama di layar utama: ${LauncherPrefs.LABEL_COLOR_NAMES[cfg.labelColorIndex]}",
             "Pengaturan widget jam",
             "Transparansi kaca: ${LauncherPrefs.GLASS_NAMES[cfg.glassIndex]}",
             "Refresh rate tertinggi: ${onOff(cfg.highRefresh, "Aktif", "Mati")}",
+            "Kelola halaman (${homePagerAdapter.pageCount} halaman)",
             "Aplikasi tersembunyi (${cfg.hidden.size})",
             "Atur ulang layar utama dan dock",
             "Jadikan launcher default"
@@ -963,38 +1161,84 @@ class MainActivity : Activity() {
                         applyStyles()
                         showSettings()
                     }
-                    1 -> chooseOne("Jumlah kolom", arrayOf("4 kolom", "5 kolom"), cfg.columns - 4) {
-                        cfg.columns = it + 4
+                    1 -> chooseOne("Ukuran grid", LauncherPrefs.GRID_NAMES, cfg.gridIndex) {
+                        cfg.gridIndex = it
                         applyStyles()
                         showSettings()
                     }
-                    2 -> chooseOne("Nama aplikasi", arrayOf("Tampil", "Sembunyi"), if (cfg.showLabels) 0 else 1) {
+                    2 -> {
+                        cfg.lockLayout = !cfg.lockLayout
+                        val msg = if (cfg.lockLayout) "Tata letak dikunci" else "Tata letak dibuka"
+                        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                        showSettings()
+                    }
+                    3 -> chooseOne("Nama aplikasi", arrayOf("Tampil", "Sembunyi"), if (cfg.showLabels) 0 else 1) {
                         cfg.showLabels = (it == 0)
                         applyStyles()
                         showSettings()
                     }
-                    3 -> chooseOne("Warna nama di layar utama", LauncherPrefs.LABEL_COLOR_NAMES, cfg.labelColorIndex) {
+                    4 -> chooseOne("Warna nama di layar utama", LauncherPrefs.LABEL_COLOR_NAMES, cfg.labelColorIndex) {
                         cfg.labelColorIndex = it
                         applyStyles()
                         showSettings()
                     }
-                    4 -> showClockSettings()
-                    5 -> chooseOne("Transparansi kaca", LauncherPrefs.GLASS_NAMES, cfg.glassIndex) {
+                    5 -> showClockSettings()
+                    6 -> chooseOne("Transparansi kaca", LauncherPrefs.GLASS_NAMES, cfg.glassIndex) {
                         cfg.glassIndex = it
                         applyStyles()
                         showSettings()
                     }
-                    6 -> chooseOne("Refresh rate tertinggi", arrayOf("Aktif", "Mati"), if (cfg.highRefresh) 0 else 1) {
+                    7 -> chooseOne("Refresh rate tertinggi", arrayOf("Aktif", "Mati"), if (cfg.highRefresh) 0 else 1) {
                         cfg.highRefresh = (it == 0)
                         applyStyles()
                         showSettings()
                     }
-                    7 -> showHiddenApps()
-                    8 -> confirmReset()
-                    9 -> openDefaultLauncherSettings()
+                    8 -> showPageManager()
+                    9 -> showHiddenApps()
+                    10 -> confirmReset()
+                    11 -> openDefaultLauncherSettings()
                 }
             }
             .setNegativeButton("Tutup", null)
+            .show()
+    }
+
+    private fun showPageManager() {
+        val total = homePagerAdapter.pageCount
+        val options = arrayOf(
+            "Tambah halaman kosong di akhir",
+            "Hapus halaman kosong terakhir"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Kelola halaman ($total halaman)")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        cfg.pageCount = total + 1
+                        renderHome()
+                        Toast.makeText(this, "Halaman ${total + 1} ditambahkan", Toast.LENGTH_SHORT).show()
+                        showSettings()
+                    }
+                    1 -> {
+                        if (total <= 1) {
+                            Toast.makeText(this, "Minimal harus ada 1 halaman", Toast.LENGTH_SHORT).show()
+                            showSettings()
+                            return@setItems
+                        }
+                        val lastPageIndex = total - 1
+                        val hasItems = homeItems.any { it.page == lastPageIndex }
+                        if (hasItems) {
+                            Toast.makeText(this, "Halaman terakhir masih berisi aplikasi/widget", Toast.LENGTH_SHORT).show()
+                        } else {
+                            cfg.pageCount = total - 1
+                            renderHome()
+                            Toast.makeText(this, "Halaman $total dihapus", Toast.LENGTH_SHORT).show()
+                        }
+                        showSettings()
+                    }
+                }
+            }
+            .setNegativeButton("Kembali") { _, _ -> showSettings() }
             .show()
     }
 
@@ -1060,6 +1304,7 @@ class MainActivity : Activity() {
             .setMessage("Isi layar utama dan dock dikembalikan ke bawaan. Pengaturan lain dan widget tidak berubah.")
             .setPositiveButton("Atur ulang") { _, _ ->
                 cfg.resetLayout()
+                homeItems.clear()
                 renderHome()
                 renderDock()
                 Toast.makeText(this, "Layar utama dan dock diatur ulang", Toast.LENGTH_SHORT).show()
