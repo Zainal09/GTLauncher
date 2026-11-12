@@ -30,7 +30,12 @@ object UsageStatsHelper {
                     context.packageName
                 )
             }
-            mode == AppOpsManager.MODE_ALLOWED
+            if (mode == AppOpsManager.MODE_ALLOWED) return true
+            // Beberapa perangkat mengembalikan MODE_DEFAULT walau akses sudah diberikan.
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            val now = System.currentTimeMillis()
+            val stats = usm?.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 86_400_000L, now)
+            return stats?.any { it.totalTimeInForeground > 0 } == true
         } catch (e: Exception) {
             false
         }
