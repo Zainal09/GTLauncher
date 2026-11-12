@@ -1,4 +1,9 @@
 .gradle/
+.gradle-home/
+.gh/
+.gh-ro/
+.android-home/
+tools/
 build/
 local.properties
 .idea/

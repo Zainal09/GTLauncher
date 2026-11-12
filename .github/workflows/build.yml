@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, feature/priority ]
   workflow_dispatch:
 
 # Izin untuk membuat GitHub Release (dipakai Obtainium untuk memantau versi baru)
@@ -33,7 +33,16 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build APK release
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Tampilkan error kompilasi
+        if: failure()
+        run: |
+          grep -E "^e: |error:|FAILURE:|What went wrong" build.log | head -80 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
 
       - name: Siapkan nama dan nomor versi
         id: ver

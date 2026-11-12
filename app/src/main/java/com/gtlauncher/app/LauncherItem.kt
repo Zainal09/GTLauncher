@@ -23,6 +23,7 @@ data class LauncherItem(
     var customTitle: String? = null,
     var customIcon: String? = null,
     var widgetId: Int? = null,
+    var highlight: Boolean = false,
     val folderItems: MutableList<LauncherItem> = mutableListOf()
 ) {
     fun toJson(): JSONObject {

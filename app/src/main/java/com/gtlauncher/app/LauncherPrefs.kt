@@ -1,6 +1,7 @@
 package com.gtlauncher.app
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,9 +30,52 @@ class LauncherPrefs(context: Context) {
         val GRID_NAMES = arrayOf("4 x 4", "4 x 5", "4 x 6", "5 x 5", "5 x 6", "6 x 6", "6 x 7")
         val GRID_COLS = intArrayOf(4, 4, 4, 5, 5, 6, 6)
         val GRID_ROWS = intArrayOf(4, 5, 6, 5, 6, 6, 7)
+
+        val THEME_NAMES = arrayOf("Otomatis", "Terang", "Gelap")
+        val SHAPE_NAMES = arrayOf("Squircle", "Lingkaran", "Kotak", "Tetesan")
+        val FONT_NAMES = arrayOf("Default", "Sans", "Serif", "Monospace", "Condensed", "Cursive")
+        val FONT_FAMILIES = arrayOf("", "sans-serif", "serif", "monospace", "sans-serif-condensed", "cursive")
+        val LABEL_SIZE_NAMES = arrayOf("Kecil", "Normal", "Besar", "Sangat besar")
+        val LABEL_SIZE_SP = intArrayOf(9, 11, 13, 15)
+        val ANIM_NAMES = arrayOf("Membesar (iOS)", "Pudar", "Geser", "Tanpa animasi")
+        val ANIM_SPEEDS = arrayOf("Pelan", "Normal", "Cepat")
+        val ANIM_SPEED_MULT = floatArrayOf(1.45f, 1f, 0.6f)
+        val SORT_NAMES = arrayOf("A - Z", "Terbaru dipasang", "Paling sering dipakai")
+        val SORT_KEYS = arrayOf("az", "newest", "frequent")
+        val REFRESH_NAMES = arrayOf("Otomatis", "60 Hz", "90 Hz", "120 Hz")
+        val REFRESH_HZ = intArrayOf(0, 60, 90, 120)
+        val BADGE_NAMES = arrayOf("Titik", "Angka", "Mati")
+        val LANGUAGE_NAMES = arrayOf("Bahasa Indonesia", "English")
+
+        const val ACTION_NONE = "none"
+        const val ACTION_DRAWER = "drawer"
+        const val ACTION_NOTIFICATIONS = "notifications"
+        const val ACTION_CONTROL_CENTER = "control_center"
+        const val ACTION_FLASHLIGHT = "flashlight"
+        const val ACTION_SEARCH = "search"
+        const val ACTION_LOCK = "lock"
+        const val ACTION_SCREENSHOT = "screenshot"
+        const val ACTION_TODAY = "today"
+        const val ACTION_SETTINGS = "settings"
+
+        val GESTURE_ACTION_KEYS = arrayOf(
+            ACTION_NONE, ACTION_DRAWER, ACTION_NOTIFICATIONS, ACTION_CONTROL_CENTER,
+            ACTION_FLASHLIGHT, ACTION_SEARCH, ACTION_LOCK, ACTION_SCREENSHOT,
+            ACTION_TODAY, ACTION_SETTINGS
+        )
+        val GESTURE_ACTION_NAMES = arrayOf(
+            "Tidak ada", "Buka Pustaka Aplikasi", "Panel notifikasi", "Pusat kontrol",
+            "Senter", "Cari (Spotlight)", "Kunci layar", "Tangkapan layar",
+            "Halaman Hari Ini", "Pengaturan launcher"
+        )
+
+        val CATEGORY_NAMES = arrayOf("Semua", "Sosial", "Game", "Produktivitas", "Hiburan", "Lainnya")
     }
 
-    private val p = context.getSharedPreferences("launcher", Context.MODE_PRIVATE)
+    private val p: SharedPreferences =
+        context.applicationContext.getSharedPreferences("launcher", Context.MODE_PRIVATE)
+
+    // ---------------------------------------------------------------- tampilan
 
     var iconSizeIndex: Int
         get() = p.getInt("iconSize", 1).coerceIn(0, ICON_SIZES_DP.size - 1)
@@ -61,6 +105,10 @@ class LauncherPrefs(context: Context) {
             columns = GRID_COLS[idx]
             rows = GRID_ROWS[idx]
         }
+
+    var autoGrid: Boolean
+        get() = p.getBoolean("autoGrid", true)
+        set(v) { p.edit().putBoolean("autoGrid", v).apply() }
 
     var lockLayout: Boolean
         get() = p.getBoolean("lockLayout", false)
@@ -114,11 +162,360 @@ class LauncherPrefs(context: Context) {
         get() = p.getInt("pageCount", 1).coerceAtLeast(1)
         set(v) { p.edit().putInt("pageCount", v.coerceAtLeast(1)).apply() }
 
+    // ---------------------------------------------------------------- tema
+
+    var themeMode: Int
+        get() = p.getInt("themeMode", 0).coerceIn(0, 2)
+        set(v) { p.edit().putInt("themeMode", v).apply() }
+
+    var accentFromWallpaper: Boolean
+        get() = p.getBoolean("accentFromWallpaper", true)
+        set(v) { p.edit().putBoolean("accentFromWallpaper", v).apply() }
+
+    var accentColor: Int
+        get() = p.getInt("accentColor", 0xFF0A84FF.toInt())
+        set(v) { p.edit().putInt("accentColor", v).apply() }
+
+    var iconShape: Int
+        get() = p.getInt("iconShape", 0).coerceIn(0, SHAPE_NAMES.size - 1)
+        set(v) { p.edit().putInt("iconShape", v).apply() }
+
+    /** 0 = ikuti bentuk, 100 = paling membulat. */
+    var iconCorner: Int
+        get() = p.getInt("iconCorner", 0).coerceIn(0, 100)
+        set(v) { p.edit().putInt("iconCorner", v).apply() }
+
+    var iconPack: String
+        get() = p.getString("iconPack", "") ?: ""
+        set(v) { p.edit().putString("iconPack", v).apply() }
+
+    var fontIndex: Int
+        get() = p.getInt("fontIndex", 0).coerceIn(0, FONT_NAMES.size - 1)
+        set(v) { p.edit().putInt("fontIndex", v).apply() }
+
+    var labelSizeIndex: Int
+        get() = p.getInt("labelSize", 1).coerceIn(0, LABEL_SIZE_SP.size - 1)
+        set(v) { p.edit().putInt("labelSize", v).apply() }
+
+    var blurEnabled: Boolean
+        get() = p.getBoolean("blur", true)
+        set(v) { p.edit().putBoolean("blur", v).apply() }
+
+    var parallax: Boolean
+        get() = p.getBoolean("parallax", true)
+        set(v) { p.edit().putBoolean("parallax", v).apply() }
+
+    var animStyle: Int
+        get() = p.getInt("animStyle", 0).coerceIn(0, ANIM_NAMES.size - 1)
+        set(v) { p.edit().putInt("animStyle", v).apply() }
+
+    var animSpeed: Int
+        get() = p.getInt("animSpeed", 1).coerceIn(0, ANIM_SPEEDS.size - 1)
+        set(v) { p.edit().putInt("animSpeed", v).apply() }
+
+    val animMult: Float get() = ANIM_SPEED_MULT[animSpeed]
+
+    var perPageWallpaper: Boolean
+        get() = p.getBoolean("perPageWallpaper", false)
+        set(v) { p.edit().putBoolean("perPageWallpaper", v).apply() }
+
+    var dailyWallpaper: Boolean
+        get() = p.getBoolean("dailyWallpaper", false)
+        set(v) { p.edit().putBoolean("dailyWallpaper", v).apply() }
+
+    var wallpaperUris: List<String>
+        get() = getList("wallpaperUris") ?: emptyList()
+        set(v) { setList("wallpaperUris", v) }
+
+    var statusBarAuto: Boolean
+        get() = p.getBoolean("statusBarAuto", true)
+        set(v) { p.edit().putBoolean("statusBarAuto", v).apply() }
+
+    // ---------------------------------------------------------------- pustaka
+
+    var librarySort: Int
+        get() = p.getInt("librarySort", 0).coerceIn(0, SORT_NAMES.size - 1)
+        set(v) { p.edit().putInt("librarySort", v).apply() }
+
+    var showRecentRow: Boolean
+        get() = p.getBoolean("showRecentRow", true)
+        set(v) { p.edit().putBoolean("showRecentRow", v).apply() }
+
+    var showFrequentRow: Boolean
+        get() = p.getBoolean("showFrequentRow", true)
+        set(v) { p.edit().putBoolean("showFrequentRow", v).apply() }
+
+    var showCategories: Boolean
+        get() = p.getBoolean("showCategories", true)
+        set(v) { p.edit().putBoolean("showCategories", v).apply() }
+
+    var showLetterIndex: Boolean
+        get() = p.getBoolean("showLetterIndex", true)
+        set(v) { p.edit().putBoolean("showLetterIndex", v).apply() }
+
+    // ---------------------------------------------------------------- pencarian
+
+    var searchAutoOpen: Boolean
+        get() = p.getBoolean("searchAutoOpen", true)
+        set(v) { p.edit().putBoolean("searchAutoOpen", v).apply() }
+
+    var searchContacts: Boolean
+        get() = p.getBoolean("searchContacts", true)
+        set(v) { p.edit().putBoolean("searchContacts", v).apply() }
+
+    var searchSettings: Boolean
+        get() = p.getBoolean("searchSettings", true)
+        set(v) { p.edit().putBoolean("searchSettings", v).apply() }
+
+    var searchWeb: Boolean
+        get() = p.getBoolean("searchWeb", true)
+        set(v) { p.edit().putBoolean("searchWeb", v).apply() }
+
+    var searchHistory: List<String>
+        get() = getList("searchHistory") ?: emptyList()
+        set(v) { setList("searchHistory", v.take(20)) }
+
+    var spotlightEnabled: Boolean
+        get() = p.getBoolean("spotlight", true)
+        set(v) { p.edit().putBoolean("spotlight", v).apply() }
+
+    // ---------------------------------------------------------------- gesture
+
+    var gestureUp: String
+        get() = p.getString("gestureUp", ACTION_DRAWER) ?: ACTION_DRAWER
+        set(v) { p.edit().putString("gestureUp", v).apply() }
+
+    var gestureDown: String
+        get() = p.getString("gestureDown", ACTION_NOTIFICATIONS) ?: ACTION_NOTIFICATIONS
+        set(v) { p.edit().putString("gestureDown", v).apply() }
+
+    var gestureDoubleTap: String
+        get() = p.getString("gestureDoubleTap", ACTION_LOCK) ?: ACTION_LOCK
+        set(v) { p.edit().putString("gestureDoubleTap", v).apply() }
+
+    var gestureTwoFinger: String
+        get() = p.getString("gestureTwoFinger", ACTION_CONTROL_CENTER) ?: ACTION_CONTROL_CENTER
+        set(v) { p.edit().putString("gestureTwoFinger", v).apply() }
+
+    var gesturePinch: String
+        get() = p.getString("gesturePinch", ACTION_NONE) ?: ACTION_NONE
+        set(v) { p.edit().putString("gesturePinch", v).apply() }
+
+    var haptics: Boolean
+        get() = p.getBoolean("haptics", true)
+        set(v) { p.edit().putBoolean("haptics", v).apply() }
+
+    // ---------------------------------------------------------------- notifikasi
+
+    var badgesEnabled: Boolean
+        get() = p.getBoolean("badges", true)
+        set(v) { p.edit().putBoolean("badges", v).apply() }
+
+    var badgeStyle: Int
+        get() = p.getInt("badgeStyle", 1).coerceIn(0, 2)
+        set(v) { p.edit().putInt("badgeStyle", v).apply() }
+
+    var notificationPreview: Boolean
+        get() = p.getBoolean("notifPreview", true)
+        set(v) { p.edit().putBoolean("notifPreview", v).apply() }
+
+    var controlCenterTiles: String
+        get() = p.getString(
+            "ccTiles",
+            "flashlight,wifi,bluetooth,rotation,dnd,game,lock,settings"
+        ) ?: ""
+        set(v) { p.edit().putString("ccTiles", v).apply() }
+
+    // ---------------------------------------------------------------- privasi
+
+    var privateApps: Set<String>
+        get() = getSet("privateApps")
+        set(v) { setSet("privateApps", v) }
+
+    var lockedApps: Set<String>
+        get() = getSet("lockedApps")
+        set(v) { setSet("lockedApps", v) }
+
+    var appPinHash: String
+        get() = p.getString("appPinHash", "") ?: ""
+        set(v) { p.edit().putString("appPinHash", v).apply() }
+
+    var appPinSalt: String
+        get() = p.getString("appPinSalt", "") ?: ""
+        set(v) { p.edit().putString("appPinSalt", v).apply() }
+
+    var timeLimits: Map<String, Int>
+        get() = getIntMap("timeLimits")
+        set(v) { setIntMap("timeLimits", v) }
+
+    // ---------------------------------------------------------------- gamer
+
+    var gameModePackage: String
+        get() = p.getString("gamePkg", "") ?: ""
+        set(v) { p.edit().putString("gamePkg", v).apply() }
+
+    var gameModeDnd: Boolean
+        get() = p.getBoolean("gameDnd", true)
+        set(v) { p.edit().putBoolean("gameDnd", v).apply() }
+
+    var gameModeBrightness: Boolean
+        get() = p.getBoolean("gameBrightness", true)
+        set(v) { p.edit().putBoolean("gameBrightness", v).apply() }
+
+    var gameFolder: Boolean
+        get() = p.getBoolean("gameFolder", true)
+        set(v) { p.edit().putBoolean("gameFolder", v).apply() }
+
+    // ---------------------------------------------------------------- sistem
+
+    var refreshMode: Int
+        get() = p.getInt("refreshMode", 0).coerceIn(0, REFRESH_NAMES.size - 1)
+        set(v) { p.edit().putInt("refreshMode", v).apply() }
+
+    var batterySaver: Boolean
+        get() = p.getBoolean("batterySaver", true)
+        set(v) { p.edit().putBoolean("batterySaver", v).apply() }
+
+    var language: String
+        get() = p.getString("language", "in") ?: "in"
+        set(v) { p.edit().putString("language", v).apply() }
+
+    var newAppHighlight: Boolean
+        get() = p.getBoolean("newAppHighlight", true)
+        set(v) { p.edit().putBoolean("newAppHighlight", v).apply() }
+
+    var lastSeenVersion: String
+        get() = p.getString("lastSeenVersion", "") ?: ""
+        set(v) { p.edit().putString("lastSeenVersion", v).apply() }
+
+    // ---------------------------------------------------------------- widget & hari ini
+
+    var weatherCache: String
+        get() = p.getString("weatherCache", "") ?: ""
+        set(v) { p.edit().putString("weatherCache", v).apply() }
+
+    var weatherUpdated: Long
+        get() = p.getLong("weatherUpdated", 0L)
+        set(v) { p.edit().putLong("weatherUpdated", v).apply() }
+
+    var weatherCity: String
+        get() = p.getString("weatherCity", "Jakarta") ?: "Jakarta"
+        set(v) { p.edit().putString("weatherCity", v).apply() }
+
+    var weatherLat: Float
+        get() = p.getFloat("weatherLat", -6.2088f)
+        set(v) { p.edit().putFloat("weatherLat", v).apply() }
+
+    var weatherLon: Float
+        get() = p.getFloat("weatherLon", 106.8456f)
+        set(v) { p.edit().putFloat("weatherLon", v).apply() }
+
+    var smartStackOrder: List<String>
+        get() = getList("stackOrder") ?: listOf("system", "weather", "calendar", "notes")
+        set(v) { setList("stackOrder", v) }
+
+    var todayNotes: String
+        get() = p.getString("todayNotes", "") ?: ""
+        set(v) { p.edit().putString("todayNotes", v).apply() }
+
+    var tasksJson: String
+        get() = p.getString("tasks", "[]") ?: "[]"
+        set(v) { p.edit().putString("tasks", v).apply() }
+
+    var favoriteContacts: List<String>
+        get() = getList("favContacts") ?: emptyList()
+        set(v) { setList("favContacts", v) }
+
+    // ---------------------------------------------------------------- peta aplikasi
+
+    var customLabels: MutableMap<String, String>
+        get() = getStringMap("customLabels")
+        set(v) { setStringMap("customLabels", v) }
+
+    var customIcons: MutableMap<String, String>
+        get() = getStringMap("customIcons")
+        set(v) { setStringMap("customIcons", v) }
+
+    // ---------------------------------------------------------------- util
+
     fun getList(key: String): List<String>? =
         p.getString(key, null)?.split(",")?.filter { it.isNotEmpty() }
 
     fun setList(key: String, list: List<String>) {
         p.edit().putString(key, list.joinToString(",")).apply()
+    }
+
+    private fun getSet(key: String): Set<String> {
+        val raw = p.getStringSet(key, null)
+        if (raw != null) return raw.toSet()
+        return (p.getString(key, "") ?: "").split(",").filter { it.isNotEmpty() }.toSet()
+    }
+
+    private fun setSet(key: String, value: Set<String>) {
+        p.edit().putStringSet(key, value).apply()
+    }
+
+    private fun getStringMap(key: String): MutableMap<String, String> {
+        val out = mutableMapOf<String, String>()
+        val raw = p.getString(key, "") ?: ""
+        if (raw.isEmpty()) return out
+        try {
+            val obj = JSONObject(raw)
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                out[k] = obj.optString(k, "")
+            }
+        } catch (e: Exception) {
+            // abaikan
+        }
+        return out
+    }
+
+    private fun setStringMap(key: String, map: Map<String, String>) {
+        val obj = JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        p.edit().putString(key, obj.toString()).apply()
+    }
+
+    private fun getIntMap(key: String): MutableMap<String, Int> {
+        val out = mutableMapOf<String, Int>()
+        val raw = p.getString(key, "") ?: ""
+        if (raw.isEmpty()) return out
+        try {
+            val obj = JSONObject(raw)
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                out[k] = obj.optInt(k, 0)
+            }
+        } catch (e: Exception) {
+            // abaikan
+        }
+        return out
+    }
+
+    private fun setIntMap(key: String, map: Map<String, Int>) {
+        val obj = JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        p.edit().putString(key, obj.toString()).apply()
+    }
+
+    fun snapshot(): Map<String, *> = p.all
+
+    fun restore(values: Map<String, *>) {
+        val editor = p.edit().clear()
+        values.forEach { (key, value) ->
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Set<*> -> editor.putStringSet(key, value.mapNotNull { it as? String }.toSet())
+            }
+        }
+        editor.apply()
     }
 
     /**

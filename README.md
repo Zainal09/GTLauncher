@@ -12,19 +12,38 @@ Cocok ditulis di laptop spek rendah: laptop cuma dipakai menulis kode, server Gi
 - Banyak halaman layar utama geser horizontal dengan titik indikator (dots indicator)
 - Ukuran grid bebas: 4x4, 4x5, 4x6, 5x5, 5x6, 6x6, hingga 6x7
 - Kunci tata letak (mencegah perubahan/penghapusan tidak sengaja)
-- Aplikasi baru otomatis dialokasikan ke sel/halaman kosong
-- Widget Android dari aplikasi lain (cuaca, kalender, dll.): tahan area kosong > Tambah widget / Hapus widget
+- Aplikasi baru otomatis dialokasikan ke sel/halaman kosong, halaman dituju otomatis, dan ikon diberi sorotan
+- Widget Android dari aplikasi lain (cuaca, kalender, dll.): tahan area kosong > Tambah widget; pemilih widget menampilkan pratinjau gambar
+- Ubah ukuran widget di mode edit: tombol panah di pojok kanan bawah, pilih 1x1, 2x2, 4x2, dan ukuran lain yang muat
 - Pustaka Aplikasi: geser ke atas; grid, pencarian, tombol Go membuka hasil teratas
+- Kategori otomatis ala iOS App Library: Semua, Sosial, Game, Produktivitas, Hiburan, Lainnya
+- Indeks huruf A-Z di tepi kanan dengan fast scroller
+- Urutkan aplikasi: A-Z, terbaru dipasang, paling sering dipakai
+- Baris "Terakhir dipakai" dan "Paling sering" di atas daftar (butuh izin Usage Access)
+- Ganti nama dan ganti ikon per aplikasi (ikon dari galeri, disimpan permanen)
+- Pilih banyak aplikasi sekaligus untuk ditambahkan ke layar utama, disembunyikan, atau dicopot
 - Geser ke bawah di layar utama: panel notifikasi
-- Tahan aplikasi di Pustaka: tambah ke layar utama / dock, sembunyikan, info, copot
+- Tahan aplikasi di Pustaka: tambah ke layar utama / dock, ganti nama/ikon, pilih banyak, sembunyikan, info, copot
 - Ketuk widget jam: buka aplikasi jam
 - Animasi: aplikasi membesar dari ikon saat dibuka, layar utama memudar masuk saat kembali
 - Pengaturan (tahan area kosong > Pengaturan launcher): ukuran ikon, grid, kunci tata letak, tombol dock, kelola halaman, nama aplikasi, warna nama,
   widget jam (tampil, 12/24 jam, tanggal, warna), transparansi kaca, paksa refresh rate tertinggi,
-  aplikasi tersembunyi, atur ulang, jadikan launcher default
+  aplikasi tersembunyi, atur ulang, jadikan launcher default, serta pengaturan Pustaka Aplikasi
 
-## Sedang dikembangkan (Fase berikutnya)
-Ubah ukuran widget bebas (1x1, 2x2, 4x2, dll.), pemilih widget dengan pratinjau gambar, App Library kategori otomatis (Sosial, Game, Produktivitas), fast scroller A-Z.
+## Fokus pembaruan ini (Fase 3)
+Bagian 1 (penempatan & layout) dan bagian 2 (Pustaka Aplikasi) diprioritaskan:
+- resize widget + pemilih widget berpratinjau
+- kategori otomatis, indeks A-Z, urutan, baris terakhir/paling sering
+- ganti nama/ikon per aplikasi, pilih banyak aplikasi
+- sorotan aplikasi baru
+
+Fitur bagian 3-10 (pencarian universal, gesture lanjutan, widget bawaan, tema lanjutan, control center, privasi, mode gamer, backup) menyusul.
+
+## Izin opsional
+- **Usage Access** (Pengaturan > Akses khusus > Akses penggunaan): baris "Terakhir dipakai"/"Paling sering".
+- **Akses notifikasi**: badge dan pratinjau notifikasi (fitur lanjutan).
+- **Aksesibilitas**: kunci layar dari gesture (fitur lanjutan).
+
 
 ## Pembaruan otomatis dengan Obtainium
 Setiap `git push` ke branch main membuat GitHub Release baru berisi APK (versi naik sendiri, mis. 1.3.7).

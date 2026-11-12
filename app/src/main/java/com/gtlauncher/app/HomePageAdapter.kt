@@ -2,9 +2,11 @@ package com.gtlauncher.app
 
 import android.graphics.Color
 import android.view.DragEvent
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
@@ -26,6 +28,7 @@ class HomePageAdapter(
     private val onItemStartDrag: (LauncherItem, View) -> Boolean,
     private val onCellDrag: (page: Int, cellLayout: CellLayout, event: DragEvent) -> Boolean,
     private val onWidgetCreateView: (widgetId: Int) -> View?,
+    private val onWidgetResize: (LauncherItem) -> Unit,
     private val getIconPx: () -> Int,
     private val getShowLabels: () -> Boolean,
     private val getLabelColor: () -> Int
@@ -132,6 +135,21 @@ class HomePageAdapter(
                     // Simpan item di tag untuk mempermudah deteksi target saat drag
                     itemView.tag = item
 
+                    if (item.highlight) {
+                        item.highlight = false
+                        itemView.setBackgroundResource(R.drawable.bg_highlight)
+                        itemView.scaleX = 0.82f
+                        itemView.scaleY = 0.82f
+                        itemView.alpha = 0.4f
+                        itemView.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .alpha(1f)
+                            .setDuration(420)
+                            .withEndAction { itemView.setBackgroundResource(0) }
+                            .start()
+                    }
+
                     val lp = CellLayout.LayoutParams(item.cellX, item.cellY, item.spanX, item.spanY)
                     cellLayout.addView(itemView, lp)
                 }
@@ -196,20 +214,51 @@ class HomePageAdapter(
                     val wView = onWidgetCreateView(wid) ?: continue
                     (wView.parent as? ViewGroup)?.removeView(wView)
 
+                    val container = FrameLayout(cellLayout.context).apply {
+                        clipChildren = false
+                        clipToPadding = false
+                    }
+                    container.addView(
+                        wView,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    )
+
                     if (isEditMode) {
-                        wView.startJiggle(position * 5 + item.cellX)
-                        wView.setOnLongClickListener {
-                            onItemStartDrag(item, wView)
+                        val delete = ImageView(cellLayout.context).apply {
+                            layoutParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.START)
+                            setBackgroundResource(R.drawable.bg_badge_delete)
+                            setImageResource(R.drawable.ic_minus)
+                            setPadding(dp(5), dp(5), dp(5), dp(5))
+                            setOnClickListener { onDeleteClick(item) }
+                        }
+                        val resize = ImageView(cellLayout.context).apply {
+                            layoutParams = FrameLayout.LayoutParams(dp(26), dp(26), Gravity.BOTTOM or Gravity.END)
+                            setBackgroundResource(R.drawable.bg_badge_delete)
+                            setImageResource(R.drawable.ic_resize)
+                            setPadding(dp(5), dp(5), dp(5), dp(5))
+                            setOnClickListener { onWidgetResize(item) }
+                        }
+                        container.addView(delete)
+                        container.addView(resize)
+                        container.startJiggle(position * 5 + item.cellX)
+                        container.setOnLongClickListener {
+                            onItemStartDrag(item, container)
                         }
                     } else {
-                        wView.stopJiggle()
+                        container.stopJiggle()
                     }
 
-                    wView.tag = item
+                    container.tag = item
                     val lp = CellLayout.LayoutParams(item.cellX, item.cellY, item.spanX, item.spanY)
-                    cellLayout.addView(wView, lp)
+                    cellLayout.addView(container, lp)
                 }
             }
         }
     }
+
+    private fun dp(value: Int): Int =
+        (value * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
 }

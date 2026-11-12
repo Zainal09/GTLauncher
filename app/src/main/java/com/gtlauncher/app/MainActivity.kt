@@ -38,6 +38,7 @@ import android.view.ViewOutlineProvider
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextClock
@@ -59,6 +60,7 @@ class MainActivity : Activity() {
         const val HOST_ID = 1024
         const val REQ_BIND = 4001
         const val REQ_CONFIGURE = 4002
+        const val REQ_CUSTOM_ICON = 4101
     }
 
     // ---- tampilan
@@ -75,6 +77,26 @@ class MainActivity : Activity() {
     private lateinit var drawerLayer: View
     private lateinit var searchInput: EditText
     private lateinit var recycler: RecyclerView
+    private lateinit var drawerTitle: TextView
+    private lateinit var btnSort: TextView
+    private lateinit var btnLibrarySettings: TextView
+    private lateinit var categoryScroll: HorizontalScrollView
+    private lateinit var categoryRow: LinearLayout
+    private lateinit var recentSection: LinearLayout
+    private lateinit var recentRow: LinearLayout
+    private lateinit var frequentSection: LinearLayout
+    private lateinit var frequentRow: LinearLayout
+    private lateinit var recentLabel: TextView
+    private lateinit var frequentLabel: TextView
+    private lateinit var listFrame: FrameLayout
+    private lateinit var emptyView: TextView
+    private lateinit var letterIndex: AlphabetIndexView
+    private lateinit var selectionBar: LinearLayout
+    private lateinit var selectionCount: TextView
+    private lateinit var btnSelAdd: TextView
+    private lateinit var btnSelHide: TextView
+    private lateinit var btnSelDelete: TextView
+    private lateinit var btnSelCancel: TextView
 
     // ---- data dan pengaturan
     private lateinit var cfg: LauncherPrefs
@@ -103,6 +125,11 @@ class MainActivity : Activity() {
     private var receiverRegistered = false
     private var returnAnim = false
     private var pendingWidgetId = -1
+
+    private var currentCategory = 0
+    private var selectionMode = false
+    private val selectedPackages = mutableSetOf<String>()
+    private var pendingCustomIconPackage = ""
 
     private val packageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -163,6 +190,26 @@ class MainActivity : Activity() {
         drawerLayer = findViewById(R.id.drawerLayer)
         searchInput = findViewById(R.id.searchInput)
         recycler = findViewById(R.id.recycler)
+        drawerTitle = findViewById(R.id.drawerTitle)
+        btnSort = findViewById(R.id.btnSort)
+        btnLibrarySettings = findViewById(R.id.btnLibrarySettings)
+        categoryScroll = findViewById(R.id.categoryScroll)
+        categoryRow = findViewById(R.id.categoryRow)
+        recentSection = findViewById(R.id.recentSection)
+        recentRow = findViewById(R.id.recentRow)
+        frequentSection = findViewById(R.id.frequentSection)
+        frequentRow = findViewById(R.id.frequentRow)
+        recentLabel = findViewById(R.id.recentLabel)
+        frequentLabel = findViewById(R.id.frequentLabel)
+        listFrame = findViewById(R.id.listFrame)
+        emptyView = findViewById(R.id.emptyView)
+        letterIndex = findViewById(R.id.letterIndex)
+        selectionBar = findViewById(R.id.selectionBar)
+        selectionCount = findViewById(R.id.selectionCount)
+        btnSelAdd = findViewById(R.id.btnSelAdd)
+        btnSelHide = findViewById(R.id.btnSelHide)
+        btnSelDelete = findViewById(R.id.btnSelDelete)
+        btnSelCancel = findViewById(R.id.btnSelCancel)
 
         btnDoneEdit.setOnClickListener { exitEditMode() }
 
@@ -178,8 +225,14 @@ class MainActivity : Activity() {
 
         // Daftar semua aplikasi (Pustaka Aplikasi)
         drawerAdapter = AppAdapter(
-            onClick = { app, view -> launch(app, view) },
-            onLongClick = { app, _ -> showAppMenu(app, fromHome = false) }
+            onClick = { app, view ->
+                if (selectionMode) toggleSelection(app.packageName)
+                else launch(app, view)
+            },
+            onLongClick = { app, _ ->
+                if (selectionMode) toggleSelection(app.packageName)
+                else showAppMenu(app, fromHome = false)
+            }
         )
         recycler.layoutManager = GridLayoutManager(this, cfg.columns)
         recycler.adapter = drawerAdapter
@@ -215,6 +268,7 @@ class MainActivity : Activity() {
             onItemStartDrag = { item, view -> startDragItem(item, view) },
             onCellDrag = { page, cellLayout, event -> handleCellDrag(page, cellLayout, event) },
             onWidgetCreateView = { wid -> createWidgetView(wid) },
+            onWidgetResize = { item -> showWidgetResize(item) },
             getIconPx = { dp(cfg.iconSizeDp) },
             getShowLabels = { cfg.showLabels },
             getLabelColor = { LauncherPrefs.LABEL_COLORS[cfg.labelColorIndex] }
@@ -238,6 +292,7 @@ class MainActivity : Activity() {
 
         setupGestures()
         setupSearch()
+        setupLibrary()
         applyStyles()
     }
 
@@ -424,6 +479,11 @@ class MainActivity : Activity() {
 
     // ================================================================ data aplikasi
 
+    private fun reloadApps() {
+        iconCache.clear()
+        loadApps()
+    }
+
     private fun loadApps() {
         executor.execute {
             val pm = packageManager
@@ -432,23 +492,46 @@ class MainActivity : Activity() {
                 .filter { it.activityInfo.packageName != packageName }
                 .mapNotNull { resolveInfo ->
                     try {
-                        val comp = ComponentName(resolveInfo.activityInfo.packageName, resolveInfo.activityInfo.name)
+                        val pkg = resolveInfo.activityInfo.packageName
+                        val comp = ComponentName(pkg, resolveInfo.activityInfo.name)
                         val key = comp.flattenToString()
-                        val icon = iconCache[key] ?: try {
-                            resolveInfo.loadIcon(pm).toIosBitmapDrawable(this@MainActivity)
-                        } catch (e: Exception) {
-                            pm.defaultActivityIcon.toIosBitmapDrawable(this@MainActivity)
-                        }.also { d -> iconCache[key] = d }
-
-                        AppInfo(
-                            label = try {
-                                resolveInfo.loadLabel(pm).toString()
+                        val customIcon = cfg.customIcons[pkg]
+                        val icon = if (!customIcon.isNullOrEmpty()) {
+                            iconCache[key] ?: loadCustomIcon(customIcon)?.also { iconCache[key] = it }
+                                ?: resolveInfo.loadIcon(pm).toIosBitmapDrawable(this@MainActivity)
+                        } else {
+                            iconCache[key] ?: try {
+                                resolveInfo.loadIcon(pm).toIosBitmapDrawable(this@MainActivity)
                             } catch (e: Exception) {
-                                resolveInfo.activityInfo.packageName
-                            },
-                            packageName = resolveInfo.activityInfo.packageName,
+                                pm.defaultActivityIcon.toIosBitmapDrawable(this@MainActivity)
+                            }.also { d -> iconCache[key] = d }
+                        }
+
+                        val appInfo = try {
+                            pm.getApplicationInfo(pkg, 0)
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val category = appInfo?.category ?: 0
+                        val label = cfg.customLabels[pkg] ?: try {
+                            resolveInfo.loadLabel(pm).toString()
+                        } catch (e: Exception) {
+                            pkg
+                        }
+                        AppInfo(
+                            label = label,
+                            packageName = pkg,
                             component = comp,
-                            icon = icon
+                            icon = icon,
+                            category = category,
+                            isGame = AppClassifier.isGame(pkg, label, category),
+                            installTime = appInfo?.let {
+                                try {
+                                    pm.getPackageInfo(pkg, 0).firstInstallTime
+                                } catch (e: Exception) {
+                                    0L
+                                }
+                            } ?: 0L
                         )
                     } catch (e: Exception) {
                         null
@@ -456,36 +539,251 @@ class MainActivity : Activity() {
                 }
                 .sortedBy { it.label.lowercase() }
 
+            UsageStatsHelper.enrich(this, raw)
+
             ui.post {
                 if (isFinishing || isDestroyed) return@post
-
-                val same = raw.size == allAppsRaw.size && raw.indices.all {
-                    raw[it].component == allAppsRaw[it].component && raw[it].label == allAppsRaw[it].label
-                }
-                if (!same) {
-                    allAppsRaw = raw
-                    rebuildVisible()
-                }
+                allAppsRaw = raw
+                rebuildVisible()
             }
+        }
+    }
+
+    private fun loadCustomIcon(uriString: String): Drawable? {
+        return try {
+            contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
+                val bitmap = android.graphics.BitmapFactory.decodeStream(input) ?: return null
+                android.graphics.drawable.BitmapDrawable(resources, bitmap)
+                    .toIosBitmapDrawable(this)
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
     private fun rebuildVisible() {
         val hidden = cfg.hidden
         allApps = allAppsRaw.filter { it.packageName !in hidden }
-        applyFilter()
+        if (selectionMode) {
+            val available = allApps.map { it.packageName }.toSet()
+            selectedPackages.retainAll(available)
+            if (selectedPackages.isEmpty()) exitSelection()
+        }
+        refreshLibrary()
         renderHome()
         renderDock()
+        refreshQuickRows()
     }
 
     private fun applyFilter() {
-        val q = searchInput.text.toString().trim()
-        filtered = if (q.isEmpty()) {
-            allApps
-        } else {
-            allApps.filter { it.label.contains(q, ignoreCase = true) }
+        refreshLibrary()
+    }
+
+    private fun setupLibrary() {
+        btnSort.setOnClickListener {
+            chooseOne(
+                "Urutkan aplikasi",
+                LauncherPrefs.SORT_NAMES,
+                cfg.librarySort
+            ) {
+                cfg.librarySort = it
+                refreshLibrary()
+            }
         }
-        drawerAdapter.submit(filtered)
+        btnLibrarySettings.setOnClickListener { showLibrarySettings() }
+        letterIndex.onLetterSelected = { letter -> scrollToLetter(letter) }
+
+        btnSelAdd.setOnClickListener {
+            for (pkg in selectedPackages.toList()) {
+                allApps.find { it.packageName == pkg }?.let { addToHome(it) }
+            }
+            exitSelection()
+        }
+        btnSelHide.setOnClickListener {
+            cfg.hidden = cfg.hidden + selectedPackages
+            exitSelection()
+            rebuildVisible()
+            Toast.makeText(this, "Aplikasi disembunyikan", Toast.LENGTH_SHORT).show()
+        }
+        btnSelDelete.setOnClickListener {
+            val pkg = selectedPackages.firstOrNull()
+            if (pkg != null) {
+                startActivity(Intent(Intent.ACTION_DELETE, Uri.fromParts("package", pkg, null)))
+            }
+            exitSelection()
+        }
+        btnSelCancel.setOnClickListener { exitSelection() }
+    }
+
+    private fun buildCategoryChips() {
+        if (!::categoryRow.isInitialized) return
+        categoryRow.removeAllViews()
+        if (!cfg.showCategories) {
+            categoryScroll.visibility = View.GONE
+            return
+        }
+        categoryScroll.visibility = View.VISIBLE
+        for (i in LauncherPrefs.CATEGORY_NAMES.indices) {
+            val chip = TextView(this).apply {
+                text = LauncherPrefs.CATEGORY_NAMES[i]
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(dp(12), 0, dp(12), 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    dp(32)
+                ).apply { marginEnd = dp(6) }
+                isClickable = true
+                setOnClickListener {
+                    currentCategory = i
+                    refreshLibrary()
+                    buildCategoryChips()
+                }
+            }
+            if (i == currentCategory) {
+                chip.setBackgroundResource(R.drawable.bg_chip_selected)
+                chip.setTextColor(Color.WHITE)
+            } else {
+                chip.setBackgroundResource(R.drawable.bg_chip)
+                chip.setTextColor(Color.WHITE)
+            }
+            categoryRow.addView(chip)
+        }
+    }
+
+    private fun refreshLibrary() {
+        if (!::searchInput.isInitialized) return
+        val query = searchInput.text.toString().trim()
+        var list = allApps.filter {
+            (currentCategory == 0 || AppClassifier.categoryIndex(it) == currentCategory) &&
+                (query.isEmpty() || it.label.contains(query, ignoreCase = true))
+        }
+        list = when (cfg.librarySort) {
+            1 -> list.sortedByDescending { it.installTime }
+            2 -> list.sortedByDescending { it.usageWeekMs }
+            else -> list.sortedBy { it.label.lowercase() }
+        }
+        filtered = list
+        drawerAdapter.submit(list)
+        emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        btnSort.text = LauncherPrefs.SORT_NAMES[cfg.librarySort]
+        updateLetterIndexVisibility()
+        val showMeta = query.isEmpty() && !selectionMode && UsageStatsHelper.hasAccess(this)
+        recentSection.visibility = if (cfg.showRecentRow && showMeta) View.VISIBLE else View.GONE
+        frequentSection.visibility = if (cfg.showFrequentRow && showMeta) View.VISIBLE else View.GONE
+        if (showMeta) refreshQuickRows()
+    }
+
+    private fun updateLetterIndexVisibility() {
+        val query = if (::searchInput.isInitialized) searchInput.text.toString().trim() else ""
+        letterIndex.visibility = if (
+            cfg.showLetterIndex && !selectionMode && query.isEmpty() && cfg.librarySort == 0
+        ) View.VISIBLE else View.GONE
+    }
+
+    private fun scrollToLetter(letter: Char) {
+        if (filtered.isEmpty()) return
+        val idx = filtered.indexOfFirst {
+            if (letter == '#') {
+                val first = it.label.firstOrNull()
+                first == null || !first.isLetter()
+            } else {
+                it.label.firstOrNull()?.uppercaseChar() == letter
+            }
+        }
+        if (idx >= 0) {
+            (recycler.layoutManager as? GridLayoutManager)?.scrollToPositionWithOffset(idx, 0)
+        }
+    }
+
+    private fun refreshQuickRows() {
+        if (!::recentRow.isInitialized) return
+        recentRow.removeAllViews()
+        frequentRow.removeAllViews()
+        if (!UsageStatsHelper.hasAccess(this)) return
+        val recent = UsageStatsHelper.recent(this, 5).mapNotNull { entry ->
+            allApps.find { it.packageName == entry.packageName }
+        }
+        val frequent = UsageStatsHelper.frequent(this, 5).mapNotNull { entry ->
+            allApps.find { it.packageName == entry.packageName }
+        }
+        buildQuickRow(recentRow, recent)
+        buildQuickRow(frequentRow, frequent)
+    }
+
+    private fun buildQuickRow(container: LinearLayout, apps: List<AppInfo>) {
+        container.removeAllViews()
+        if (apps.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = "Belum ada data"
+                setTextColor(Color.parseColor("#99FFFFFF"))
+                textSize = 11f
+            })
+            return
+        }
+        for (app in apps.take(4)) {
+            val cell = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                isClickable = true
+                setOnClickListener { launch(app, null) }
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            cell.addView(ImageView(this).apply {
+                setImageDrawable(app.icon)
+                layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+            })
+            cell.addView(TextView(this).apply {
+                text = app.label
+                textSize = 9.5f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                setPadding(0, dp(3), 0, 0)
+            })
+            container.addView(cell)
+        }
+    }
+
+    private fun enterSelection(packageName: String) {
+        selectionMode = true
+        selectedPackages.clear()
+        selectedPackages.add(packageName)
+        drawerAdapter.selectionMode = true
+        drawerAdapter.selected = selectedPackages
+        drawerAdapter.notifyDataSetChanged()
+        selectionBar.visibility = View.VISIBLE
+        updateSelectionBar()
+        updateLetterIndexVisibility()
+    }
+
+    private fun toggleSelection(packageName: String) {
+        if (selectedPackages.contains(packageName)) selectedPackages.remove(packageName)
+        else selectedPackages.add(packageName)
+        if (selectedPackages.isEmpty()) {
+            exitSelection()
+            return
+        }
+        drawerAdapter.selected = selectedPackages
+        drawerAdapter.notifyDataSetChanged()
+        updateSelectionBar()
+    }
+
+    private fun exitSelection() {
+        selectionMode = false
+        selectedPackages.clear()
+        if (::drawerAdapter.isInitialized) {
+            drawerAdapter.selectionMode = false
+            drawerAdapter.selected = emptySet()
+            drawerAdapter.notifyDataSetChanged()
+        }
+        if (::selectionBar.isInitialized) selectionBar.visibility = View.GONE
+        updateLetterIndexVisibility()
+    }
+
+    private fun updateSelectionBar() {
+        selectionCount.text = "${selectedPackages.size} dipilih"
     }
 
     // ================================================================ tampilan dan pengaturan
@@ -496,6 +794,14 @@ class MainActivity : Activity() {
 
         drawerAdapter.applyStyle(iconPx, cfg.showLabels, Color.WHITE)
         (recycler.layoutManager as GridLayoutManager).spanCount = cfg.columns
+        drawerTitle.setTextColor(Color.WHITE)
+        btnSort.setTextColor(Color.WHITE)
+        btnLibrarySettings.setTextColor(Color.WHITE)
+        recentLabel.setTextColor(Color.parseColor("#99FFFFFF"))
+        frequentLabel.setTextColor(Color.parseColor("#99FFFFFF"))
+        emptyView.setTextColor(Color.parseColor("#99FFFFFF"))
+        letterIndex.setTextColor(Color.parseColor("#99FFFFFF"))
+        buildCategoryChips()
 
         hintView.setTextColor((labelColor and 0x00FFFFFF) or 0xB3000000.toInt())
 
@@ -514,6 +820,7 @@ class MainActivity : Activity() {
 
         renderDock()
         renderHome()
+        refreshLibrary()
         applyRefreshRate()
     }
 
@@ -888,10 +1195,14 @@ class MainActivity : Activity() {
                 cellY = targetPos.second,
                 spanX = 1,
                 spanY = 1,
-                packageName = pkg
+                packageName = pkg,
+                highlight = true
             )
         )
         cfg.setHomeItems(homeItems)
+        renderHome()
+        homePager.setCurrentItem(targetPage, true)
+        Toast.makeText(this, "Aplikasi baru ditambahkan ke halaman ${targetPage + 1}", Toast.LENGTH_SHORT).show()
     }
 
     private fun addToHome(app: AppInfo) {
@@ -1243,30 +1554,7 @@ class MainActivity : Activity() {
     }
 
     private fun showWidgetPicker() {
-        val pm = packageManager
-        val raw = try {
-            appWidgetManager.installedProviders
-        } catch (e: Exception) {
-            emptyList<AppWidgetProviderInfo>()
-        }
-        val providers = raw.sortedBy { it.loadLabel(pm).orEmpty().lowercase() }
-        if (providers.isEmpty()) {
-            Toast.makeText(this, "Tidak ada widget tersedia", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val names = providers.map { info ->
-            val app = try {
-                pm.getApplicationInfo(info.provider.packageName, 0).loadLabel(pm).toString()
-            } catch (e: Exception) {
-                info.provider.packageName
-            }
-            "$app  •  ${info.loadLabel(pm)}"
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Tambah widget")
-            .setItems(names.toTypedArray()) { _, which -> addWidget(providers[which]) }
-            .setNegativeButton("Batal", null)
-            .show()
+        WidgetPreviewDialog(this) { info -> addWidget(info) }.show()
     }
 
     private fun addWidget(info: AppWidgetProviderInfo) {
@@ -1400,6 +1688,25 @@ class MainActivity : Activity() {
             REQ_CONFIGURE -> {
                 if (resultCode == RESULT_OK && id != -1) finishAddWidget(id) else cancelPendingWidget()
             }
+            REQ_CUSTOM_ICON -> {
+                if (resultCode == RESULT_OK && data?.data != null && pendingCustomIconPackage.isNotEmpty()) {
+                    val uri = data.data!!
+                    try {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    } catch (e: Exception) {
+                        // abaikan
+                    }
+                    val map = cfg.customIcons
+                    map[pendingCustomIconPackage] = uri.toString()
+                    cfg.customIcons = map
+                    pendingCustomIconPackage = ""
+                    reloadApps()
+                    Toast.makeText(this, "Ikon diperbarui", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -1421,6 +1728,40 @@ class MainActivity : Activity() {
         cfg.setHomeItems(homeItems)
         renderHome()
         Toast.makeText(this, "Widget dihapus", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showWidgetResize(item: LauncherItem) {
+        val sizes = listOf(
+            1 to 1, 2 to 1, 2 to 2, 3 to 1, 3 to 2,
+            4 to 1, 4 to 2, 4 to 3, 5 to 2, 6 to 2
+        ).filter { it.first <= cfg.columns && it.second <= cfg.rows }
+        val labels = sizes.map { "${it.first} x ${it.second}" }.toTypedArray()
+        val current = sizes.indexOfFirst { it.first == item.spanX && it.second == item.spanY }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Ubah ukuran widget")
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                val (sx, sy) = sizes[which]
+                if (isAreaFree(item.page, item.cellX, item.cellY, sx, sy, item.id)) {
+                    item.spanX = sx
+                    item.spanY = sy
+                    cfg.setHomeItems(homeItems)
+                    renderHome()
+                    dialog.dismiss()
+                } else {
+                    Toast.makeText(this, "Tidak muat di posisi ini", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                }
+            }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
+
+    private fun isAreaFree(page: Int, x: Int, y: Int, spanX: Int, spanY: Int, ignoreId: String): Boolean {
+        if (x < 0 || y < 0 || x + spanX > cfg.columns || y + spanY > cfg.rows) return false
+        return homeItems.filter { it.page == page && it.id != ignoreId }.none { item ->
+            x < item.cellX + item.spanX && x + spanX > item.cellX &&
+                y < item.cellY + item.spanY && y + spanY > item.cellY
+        }
     }
 
     private fun showRemoveWidget() {
@@ -1490,6 +1831,10 @@ class MainActivity : Activity() {
                 )
             )
         }
+        labels.add("Ganti nama aplikasi")
+        actions.add { promptRenameApp(app) }
+        labels.add("Ganti ikon aplikasi")
+        actions.add { pickCustomIcon(app) }
         if (!cfg.lockLayout) {
             labels.add("Copot pemasangan")
             actions.add {
@@ -1519,6 +1864,12 @@ class MainActivity : Activity() {
         actions.add { addToHome(app) }
         labels.add("Tambah ke dock")
         actions.add { addToDock(app) }
+        labels.add("Ganti nama aplikasi")
+        actions.add { promptRenameApp(app) }
+        labels.add("Ganti ikon aplikasi")
+        actions.add { pickCustomIcon(app) }
+        labels.add("Pilih banyak")
+        actions.add { enterSelection(app.packageName) }
         labels.add("Sembunyikan aplikasi")
         actions.add {
             cfg.hidden = cfg.hidden + app.packageName
@@ -1555,6 +1906,70 @@ class MainActivity : Activity() {
                 }
             }
             .show()
+    }
+
+    private fun promptRenameApp(app: AppInfo) {
+        val input = EditText(this).apply {
+            setText(app.label)
+            setSingleLine()
+            setSelection(app.label.length)
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Ganti nama aplikasi")
+            .setView(box)
+            .setPositiveButton("Simpan") { _, _ ->
+                val name = input.text.toString().trim()
+                val map = cfg.customLabels
+                if (name.isEmpty() || name == app.label) map.remove(app.packageName)
+                else map[app.packageName] = name
+                cfg.customLabels = map
+                reloadApps()
+            }
+            .setNeutralButton("Kembalikan") { _, _ ->
+                val map = cfg.customLabels
+                map.remove(app.packageName)
+                cfg.customLabels = map
+                reloadApps()
+            }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
+
+    private fun pickCustomIcon(app: AppInfo) {
+        if (cfg.customIcons.containsKey(app.packageName)) {
+            AlertDialog.Builder(this)
+                .setTitle("Ikon ${app.label}")
+                .setItems(arrayOf("Pilih gambar baru", "Kembalikan ikon bawaan")) { _, which ->
+                    if (which == 0) openIconPicker(app)
+                    else {
+                        val map = cfg.customIcons
+                        map.remove(app.packageName)
+                        cfg.customIcons = map
+                        reloadApps()
+                    }
+                }
+                .show()
+            return
+        }
+        openIconPicker(app)
+    }
+
+    private fun openIconPicker(app: AppInfo) {
+        pendingCustomIconPackage = app.packageName
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        try {
+            startActivityForResult(intent, REQ_CUSTOM_ICON)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Tidak bisa membuka galeri", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun openWallpaperPicker() {
@@ -1596,7 +2011,8 @@ class MainActivity : Activity() {
             "Kelola halaman (${homePagerAdapter.pageCount} halaman)",
             "Aplikasi tersembunyi (${cfg.hidden.size})",
             "Atur ulang layar utama dan dock",
-            "Jadikan launcher default"
+            "Jadikan launcher default",
+            "Pustaka aplikasi: urutan, kategori, A-Z, terakhir dipakai"
         )
         AlertDialog.Builder(this)
             .setTitle("Pengaturan GT Launcher")
@@ -1648,9 +2064,65 @@ class MainActivity : Activity() {
                     10 -> showHiddenApps()
                     11 -> confirmReset()
                     12 -> openDefaultLauncherSettings()
+                    13 -> showLibrarySettings()
                 }
             }
             .setNegativeButton("Tutup", null)
+            .show()
+    }
+
+    private fun showLibrarySettings() {
+        val items = arrayOf(
+            "Urutkan: ${LauncherPrefs.SORT_NAMES[cfg.librarySort]}",
+            "Kategori otomatis: ${onOff(cfg.showCategories, "Tampil", "Sembunyi")}",
+            "Indeks A-Z: ${onOff(cfg.showLetterIndex, "Tampil", "Sembunyi")}",
+            "Baris terakhir dipakai: ${onOff(cfg.showRecentRow, "Tampil", "Sembunyi")}",
+            "Baris paling sering: ${onOff(cfg.showFrequentRow, "Tampil", "Sembunyi")}",
+            "Aplikasi tersembunyi (${cfg.hidden.size})",
+            "Izin Usage Access: ${onOff(UsageStatsHelper.hasAccess(this), "Diberikan", "Belum")}",
+            "Reset nama & ikon khusus (${cfg.customLabels.size + cfg.customIcons.size})"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Pustaka Aplikasi")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> chooseOne("Urutkan aplikasi", LauncherPrefs.SORT_NAMES, cfg.librarySort) {
+                        cfg.librarySort = it
+                        refreshLibrary()
+                        showLibrarySettings()
+                    }
+                    1 -> {
+                        cfg.showCategories = !cfg.showCategories
+                        buildCategoryChips()
+                        refreshLibrary()
+                        showLibrarySettings()
+                    }
+                    2 -> {
+                        cfg.showLetterIndex = !cfg.showLetterIndex
+                        updateLetterIndexVisibility()
+                        showLibrarySettings()
+                    }
+                    3 -> {
+                        cfg.showRecentRow = !cfg.showRecentRow
+                        refreshLibrary()
+                        showLibrarySettings()
+                    }
+                    4 -> {
+                        cfg.showFrequentRow = !cfg.showFrequentRow
+                        refreshLibrary()
+                        showLibrarySettings()
+                    }
+                    5 -> showHiddenApps()
+                    6 -> UsageStatsHelper.openAccessSettings(this)
+                    7 -> {
+                        cfg.customLabels = mutableMapOf()
+                        cfg.customIcons = mutableMapOf()
+                        reloadApps()
+                        showLibrarySettings()
+                    }
+                }
+            }
+            .setNegativeButton("Kembali") { _, _ -> showSettings() }
             .show()
     }
 
