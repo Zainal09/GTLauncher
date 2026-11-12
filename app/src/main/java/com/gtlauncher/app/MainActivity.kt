@@ -339,6 +339,10 @@ class MainActivity : Activity() {
                     .start()
             }
         }
+        if (drawerOpen && ::recentRow.isInitialized) {
+            refreshLibrary()
+            refreshQuickRows()
+        }
     }
 
     override fun onStop() {
@@ -606,9 +610,13 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Aplikasi disembunyikan", Toast.LENGTH_SHORT).show()
         }
         btnSelDelete.setOnClickListener {
-            val pkg = selectedPackages.firstOrNull()
+            val pkgs = selectedPackages.toList()
+            val pkg = pkgs.firstOrNull()
             if (pkg != null) {
                 startActivity(Intent(Intent.ACTION_DELETE, Uri.fromParts("package", pkg, null)))
+                if (pkgs.size > 1) {
+                    Toast.makeText(this, "Copot satu per satu untuk aplikasi lain", Toast.LENGTH_SHORT).show()
+                }
             }
             exitSelection()
         }
@@ -890,11 +898,15 @@ class MainActivity : Activity() {
         drawerLayer.translationY = dp(60).toFloat()
         drawerLayer.animate().alpha(1f).translationY(0f).setDuration(220).withLayer().start()
         homeLayer.animate().alpha(0f).setDuration(180).withLayer().start()
+        refreshLibrary()
+        refreshQuickRows()
+        buildCategoryChips()
     }
 
     private fun closeDrawer(immediate: Boolean = false) {
         if (!drawerOpen) return
         drawerOpen = false
+        exitSelection()
         hideKeyboard()
         searchInput.setText("")
         searchInput.clearFocus()
