@@ -106,6 +106,10 @@ class LauncherPrefs(context: Context) {
         get() = (p.getString("widgets", "") ?: "").split(",").mapNotNull { it.toIntOrNull() }
         set(v) { p.edit().putString("widgets", v.joinToString(",")).apply() }
 
+    var showDrawerButton: Boolean
+        get() = p.getBoolean("showDrawerButton", false)
+        set(v) { p.edit().putBoolean("showDrawerButton", v).apply() }
+
     var pageCount: Int
         get() = p.getInt("pageCount", 1).coerceAtLeast(1)
         set(v) { p.edit().putInt("pageCount", v.coerceAtLeast(1)).apply() }
@@ -150,6 +154,53 @@ class LauncherPrefs(context: Context) {
         if (maxPage + 1 > pageCount) {
             pageCount = maxPage + 1
         }
+    }
+
+    /**
+     * Membaca daftar item di dock.
+     */
+    fun getDockItems(): List<LauncherItem> {
+        val raw = p.getString("dock_items_v2", null) ?: return emptyList()
+        val items = mutableListOf<LauncherItem>()
+        try {
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i)
+                if (obj != null) {
+                    items.add(LauncherItem.fromJson(obj))
+                }
+            }
+        } catch (e: Exception) {
+            // abaikan format rusak
+        }
+        return items
+    }
+
+    /**
+     * Menyimpan daftar item di dock.
+     */
+    fun setDockItems(items: List<LauncherItem>) {
+        val arr = JSONArray()
+        items.forEach { arr.put(it.toJson()) }
+        p.edit().putString("dock_items_v2", arr.toString()).apply()
+    }
+
+    fun migrateOldDockIfNeeded(defaultPkgsSupplier: () -> List<String>): List<LauncherItem> {
+        val existing = getDockItems()
+        if (existing.isNotEmpty()) return existing
+
+        val oldPkgs = getList("dock") ?: defaultPkgsSupplier()
+        val migrated = oldPkgs.mapIndexed { idx, pkg ->
+            LauncherItem(
+                type = ItemType.APP,
+                page = 0,
+                cellX = idx,
+                cellY = 0,
+                packageName = pkg
+            )
+        }
+        setDockItems(migrated)
+        return migrated
     }
 
     /**
@@ -201,6 +252,7 @@ class LauncherPrefs(context: Context) {
             .remove("home")
             .remove("home_items_v2")
             .remove("dock")
+            .remove("dock_items_v2")
             .remove("pageCount")
             .apply()
     }

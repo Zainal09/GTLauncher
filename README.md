@@ -4,7 +4,11 @@ Launcher Android sederhana (Kotlin + XML, tanpa Compose) yang dibuild otomatis o
 Cocok ditulis di laptop spek rendah: laptop cuma dipakai menulis kode, server GitHub yang membuild APK.
 
 ## Fitur
-- Tema bergaya iOS: ikon squircle seragam, widget jam kaca, dock kaca 4 ikon
+- Tema bergaya iOS: ikon squircle seragam, widget jam kaca, dock kaca
+- Mode edit ala iOS: tahan lama, ikon bergoyang (jiggle mode), tombol hapus (-) di pojok, dan tombol Selesai
+- Drag and drop: geser posisi ikon di layar utama dan antar-halaman otomatis saat digeser ke tepi layar
+- Folder: seret ikon ke ikon lain untuk membuat folder, pratinjau mini 3x3 kaca, dialog buka folder dengan nama yang bisa diubah
+- Dock interaktif: atur urutan ikon dengan drag, folder di dock, dan tombol Pustaka Aplikasi di dock (opsional di Pengaturan)
 - Banyak halaman layar utama geser horizontal dengan titik indikator (dots indicator)
 - Ukuran grid bebas: 4x4, 4x5, 4x6, 5x5, 5x6, 6x6, hingga 6x7
 - Kunci tata letak (mencegah perubahan/penghapusan tidak sengaja)
@@ -15,12 +19,12 @@ Cocok ditulis di laptop spek rendah: laptop cuma dipakai menulis kode, server Gi
 - Tahan aplikasi di Pustaka: tambah ke layar utama / dock, sembunyikan, info, copot
 - Ketuk widget jam: buka aplikasi jam
 - Animasi: aplikasi membesar dari ikon saat dibuka, layar utama memudar masuk saat kembali
-- Pengaturan (tahan area kosong > Pengaturan launcher): ukuran ikon, grid, kunci tata letak, kelola halaman, nama aplikasi, warna nama,
+- Pengaturan (tahan area kosong > Pengaturan launcher): ukuran ikon, grid, kunci tata letak, tombol dock, kelola halaman, nama aplikasi, warna nama,
   widget jam (tampil, 12/24 jam, tanggal, warna), transparansi kaca, paksa refresh rate tertinggi,
   aplikasi tersembunyi, atur ulang, jadikan launcher default
 
 ## Sedang dikembangkan (Fase berikutnya)
-Folder, mode edit ala iOS (ikon bergoyang/jiggle + tombol minus), drag and drop ikon & dock, ubah ukuran widget bebas, App Library kategori otomatis.
+Ubah ukuran widget bebas (1x1, 2x2, 4x2, dll.), pemilih widget dengan pratinjau gambar, App Library kategori otomatis (Sosial, Game, Produktivitas), fast scroller A-Z.
 
 ## Pembaruan otomatis dengan Obtainium
 Setiap `git push` ke branch main membuat GitHub Release baru berisi APK (versi naik sendiri, mis. 1.3.7).

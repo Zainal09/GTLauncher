@@ -7,6 +7,7 @@ import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.BroadcastReceiver
+import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -14,7 +15,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Outline
-import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -27,8 +27,10 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.DragEvent
 import android.view.GestureDetector
 import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -69,6 +71,7 @@ class MainActivity : Activity() {
     private lateinit var homePager: ViewPager2
     private lateinit var pageIndicator: PageIndicatorDotsView
     private lateinit var dock: LinearLayout
+    private lateinit var btnDoneEdit: TextView
     private lateinit var drawerLayer: View
     private lateinit var searchInput: EditText
     private lateinit var recycler: RecyclerView
@@ -83,15 +86,19 @@ class MainActivity : Activity() {
 
     private val executor = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
+    private val edgeScrollHandler = Handler(Looper.getMainLooper())
+    private var edgeScrollRunnable: Runnable? = null
 
-    /** Ikon yang sudah diproses disimpan di sini, supaya tidak diproses ulang tiap kembali ke layar utama. */
+    /** Ikon yang sudah diproses disimpan di sini. */
     private val iconCache = ConcurrentHashMap<String, Drawable>()
 
     private var allAppsRaw: List<AppInfo> = emptyList()
     private var allApps: List<AppInfo> = emptyList()
     private var filtered: List<AppInfo> = emptyList()
     private var homeItems: MutableList<LauncherItem> = mutableListOf()
+    private var dockItems: MutableList<LauncherItem> = mutableListOf()
 
+    private var isEditMode = false
     private var drawerOpen = false
     private var receiverRegistered = false
     private var returnAnim = false
@@ -107,11 +114,21 @@ class MainActivity : Activity() {
                 }
 
                 if (action == Intent.ACTION_PACKAGE_REMOVED && !intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
-                    // Hapus dari layar utama jika aplikasi dicopot
                     homeItems.removeAll { it.type == ItemType.APP && it.packageName == pkg }
+                    homeItems.forEach { folder ->
+                        if (folder.type == ItemType.FOLDER) {
+                            folder.folderItems.removeAll { it.packageName == pkg }
+                        }
+                    }
+                    dockItems.removeAll { it.type == ItemType.APP && it.packageName == pkg }
+                    dockItems.forEach { folder ->
+                        if (folder.type == ItemType.FOLDER) {
+                            folder.folderItems.removeAll { it.packageName == pkg }
+                        }
+                    }
                     cfg.setHomeItems(homeItems)
+                    cfg.setDockItems(dockItems)
                 } else if (action == Intent.ACTION_PACKAGE_ADDED && !intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
-                    // Aplikasi baru terpasang: masukkan otomatis ke sel kosong
                     onNewPackageAdded(pkg)
                 }
             }
@@ -142,9 +159,12 @@ class MainActivity : Activity() {
         homePager = findViewById(R.id.homePager)
         pageIndicator = findViewById(R.id.pageIndicator)
         dock = findViewById(R.id.dock)
+        btnDoneEdit = findViewById(R.id.btnDoneEdit)
         drawerLayer = findViewById(R.id.drawerLayer)
         searchInput = findViewById(R.id.searchInput)
         recycler = findViewById(R.id.recycler)
+
+        btnDoneEdit.setOnClickListener { exitEditMode() }
 
         // Beri ruang untuk status bar, navigation bar, dan keyboard
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
@@ -173,9 +193,27 @@ class MainActivity : Activity() {
             getRows = { cfg.rows },
             getItemsForPage = { page -> homeItems.filter { it.page == page } },
             getAppInfo = { item -> allApps.find { it.packageName == item.packageName } },
-            onItemClick = { _, app, view -> launch(app, view) },
-            onItemLongClick = { item, app, _ -> showHomeItemMenu(item, app) },
-            onPageLongClick = { _ -> showHomeMenu() },
+            onItemClick = { _, app, view ->
+                if (app != null) launch(app, view)
+            },
+            onItemLongClick = { item, app, _ ->
+                if (!cfg.lockLayout) {
+                    enterEditMode()
+                } else if (app != null) {
+                    showHomeItemMenu(item, app)
+                }
+            },
+            onPageLongClick = { _ ->
+                if (!cfg.lockLayout && !isEditMode) {
+                    enterEditMode()
+                } else {
+                    showHomeMenu()
+                }
+            },
+            onDeleteClick = { item -> confirmDeleteItem(item) },
+            onFolderClick = { folder, _ -> showFolderDialog(folder) },
+            onItemStartDrag = { item, view -> startDragItem(item, view) },
+            onCellDrag = { page, cellLayout, event -> handleCellDrag(page, cellLayout, event) },
             onWidgetCreateView = { wid -> createWidgetView(wid) },
             getIconPx = { dp(cfg.iconSizeDp) },
             getShowLabels = { cfg.showLabels },
@@ -184,14 +222,17 @@ class MainActivity : Activity() {
         homePager.adapter = homePagerAdapter
         pageIndicator.attachToViewPager(homePager)
 
-        // Ketuk widget jam -> buka aplikasi jam. Tahan area kosong -> menu layar utama.
+        // Setup drag listener pada dock
+        setupDockDrag()
+
+        // Ketuk widget jam -> buka aplikasi jam. Tahan area kosong -> menu layar utama / edit mode.
         widget.setOnClickListener { openClockApp() }
         widget.setOnLongClickListener {
-            showHomeMenu()
+            if (!cfg.lockLayout) enterEditMode() else showHomeMenu()
             true
         }
         homeLayer.setOnLongClickListener {
-            showHomeMenu()
+            if (!cfg.lockLayout) enterEditMode() else showHomeMenu()
             true
         }
 
@@ -220,14 +261,13 @@ class MainActivity : Activity() {
         try {
             appWidgetHost.startListening()
         } catch (e: Exception) {
-            // beberapa perangkat menolak, widget tetap tampil tapi tidak ter-update otomatis
+            // beberapa perangkat menolak, abaikan
         }
         loadApps()
     }
 
     override fun onResume() {
         super.onResume()
-        // Efek halus saat kembali dari aplikasi ke layar utama
         if (returnAnim) {
             returnAnim = false
             if (!drawerOpen) {
@@ -248,6 +288,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        cancelEdgeScroll()
         try {
             appWidgetHost.stopListening()
         } catch (e: Exception) {
@@ -257,7 +298,7 @@ class MainActivity : Activity() {
             try {
                 unregisterReceiver(packageReceiver)
             } catch (e: IllegalArgumentException) {
-                // sudah tidak terdaftar, abaikan
+                // abaikan
             }
             receiverRegistered = false
         }
@@ -265,16 +306,17 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        cancelEdgeScroll()
         executor.shutdown()
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        // Tombol Home ditekan saat launcher sudah terbuka -> kembali ke halaman 0 dan tutup drawer
         if (intent != null &&
             intent.action == Intent.ACTION_MAIN &&
             intent.hasCategory(Intent.CATEGORY_HOME)
         ) {
+            if (isEditMode) exitEditMode()
             closeDrawer()
             if (::homePager.isInitialized && homePager.currentItem != 0) {
                 homePager.setCurrentItem(0, true)
@@ -284,8 +326,31 @@ class MainActivity : Activity() {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        // Launcher tidak boleh menutup dirinya sendiri; cukup tutup Pustaka Aplikasi
-        if (drawerOpen) closeDrawer()
+        if (drawerOpen) {
+            closeDrawer()
+        } else if (isEditMode) {
+            exitEditMode()
+        }
+    }
+
+    // ================================================================ mode edit ala iOS
+
+    private fun enterEditMode() {
+        if (cfg.lockLayout) {
+            Toast.makeText(this, "Tata letak terkunci", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isEditMode = true
+        btnDoneEdit.visibility = View.VISIBLE
+        homePagerAdapter.isEditMode = true
+        renderDock()
+    }
+
+    private fun exitEditMode() {
+        isEditMode = false
+        btnDoneEdit.visibility = View.GONE
+        homePagerAdapter.isEditMode = false
+        renderDock()
     }
 
     // ================================================================ gesture
@@ -301,10 +366,9 @@ class MainActivity : Activity() {
                 if (e1 == null) return false
                 val dy = e2.y - e1.y
                 val dx = e2.x - e1.x
-                if (Math.abs(dy) < Math.abs(dx)) return false // geseran mendatar (diurus ViewPager2)
+                if (Math.abs(dy) < Math.abs(dx)) return false
 
                 if (drawerOpen) {
-                    // Geser cepat ke bawah saat daftar sudah di paling atas -> tutup
                     if (velocityY > 2000f && dy > dp(80) && !recycler.canScrollVertically(-1)) {
                         closeDrawer()
                         return true
@@ -312,12 +376,12 @@ class MainActivity : Activity() {
                     return false
                 }
 
+                if (isEditMode) return false
+
                 if (velocityY < -1200f && dy < -dp(80)) {
-                    // Geser ke atas: buka Pustaka Aplikasi
                     openDrawer()
                     return true
                 } else if (velocityY > 1500f && dy > dp(80)) {
-                    // Geser ke bawah di layar utama: panel notifikasi
                     expandNotifications()
                     return true
                 }
@@ -352,7 +416,6 @@ class MainActivity : Activity() {
 
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
         })
-        // Tombol "Go" di keyboard membuka hasil teratas
         searchInput.setOnEditorActionListener { _, _, _ ->
             filtered.firstOrNull()?.let { launch(it, null) }
             true
@@ -407,7 +470,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Hitung ulang daftar yang terlihat lalu perbarui semua tampilan. */
     private fun rebuildVisible() {
         val hidden = cfg.hidden
         allApps = allAppsRaw.filter { it.packageName !in hidden }
@@ -435,10 +497,8 @@ class MainActivity : Activity() {
         drawerAdapter.applyStyle(iconPx, cfg.showLabels, Color.WHITE)
         (recycler.layoutManager as GridLayoutManager).spanCount = cfg.columns
 
-        // Teks petunjuk mengikuti warna nama aplikasi
         hintView.setTextColor((labelColor and 0x00FFFFFF) or 0xB3000000.toInt())
 
-        // Widget jam
         widget.visibility = if (cfg.clockVisible) View.VISIBLE else View.GONE
         val fmt = if (cfg.clock24) "HH:mm" else "h:mm"
         clockView.format24Hour = fmt
@@ -448,7 +508,6 @@ class MainActivity : Activity() {
         dateView.setTextColor((clockColor and 0x00FFFFFF) or 0xCC000000.toInt())
         dateView.visibility = if (cfg.showDate) View.VISIBLE else View.GONE
 
-        // Transparansi kaca untuk widget jam dan dock
         val fill = Color.argb(LauncherPrefs.GLASS_ALPHAS[cfg.glassIndex], 255, 255, 255)
         (widget.background.mutate() as? GradientDrawable)?.setColor(fill)
         (dock.background.mutate() as? GradientDrawable)?.setColor(fill)
@@ -517,6 +576,7 @@ class MainActivity : Activity() {
 
     private fun openDrawer() {
         if (drawerOpen) return
+        if (isEditMode) exitEditMode()
         drawerOpen = true
         drawerLayer.visibility = View.VISIBLE
         drawerLayer.alpha = 0f
@@ -559,12 +619,6 @@ class MainActivity : Activity() {
 
     // ================================================================ dock
 
-    private fun resolvePackages(intents: List<Intent>): List<String> =
-        intents.mapNotNull {
-            packageManager.resolveActivity(it, PackageManager.MATCH_DEFAULT_ONLY)
-                ?.activityInfo?.packageName
-        }.distinct()
-
     private fun defaultDock(): List<String> = resolvePackages(
         listOf(
             Intent(Intent.ACTION_DIAL),
@@ -574,60 +628,189 @@ class MainActivity : Activity() {
         )
     )
 
-    private fun dockPackages(): List<String> {
-        val pkgs = cfg.getList("dock") ?: defaultDock()
-        return pkgs.filter { p -> allApps.any { it.packageName == p } }.take(MAX_DOCK)
-    }
-
     private fun renderDock() {
+        if (dockItems.isEmpty()) {
+            dockItems = cfg.migrateOldDockIfNeeded { defaultDock() }.toMutableList()
+        }
+
         dock.removeAllViews()
         val size = dp(cfg.iconSizeDp)
-        dockPackages()
-            .mapNotNull { pkg -> allApps.find { it.packageName == pkg } }
-            .forEach { app ->
-                val cell = FrameLayout(this)
-                cell.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
 
-                val iv = ImageView(this)
-                iv.setImageDrawable(app.icon.constantState?.newDrawable(resources) ?: app.icon)
-                iv.layoutParams = FrameLayout.LayoutParams(size, size, Gravity.CENTER)
-                iv.pressEffect()
-                iv.setOnClickListener { launch(app, iv) }
-                iv.setOnLongClickListener {
-                    removeFromDock(app)
-                    true
-                }
-                cell.addView(iv)
-                dock.addView(cell)
+        for (item in dockItems.take(MAX_DOCK)) {
+            val cell = FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                clipChildren = false
+                clipToPadding = false
             }
+
+            val iv = ImageView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(size, size, Gravity.CENTER)
+            }
+
+            if (item.type == ItemType.APP) {
+                val app = allApps.find { it.packageName == item.packageName }
+                if (app != null) {
+                    iv.setImageDrawable(app.icon.constantState?.newDrawable(resources) ?: app.icon)
+                    if (!isEditMode) {
+                        iv.pressEffect()
+                        iv.setOnClickListener { launch(app, iv) }
+                        iv.setOnLongClickListener {
+                            if (!cfg.lockLayout) enterEditMode() else removeFromDock(item)
+                            true
+                        }
+                    }
+                }
+            } else if (item.type == ItemType.FOLDER) {
+                val childIcons = item.folderItems.mapNotNull { child ->
+                    allApps.find { it.packageName == child.packageName }?.icon
+                }
+                iv.setImageDrawable(createFolderIcon(this, childIcons, size))
+                if (!isEditMode) {
+                    iv.pressEffect()
+                    iv.setOnClickListener { showFolderDialog(item) }
+                    iv.setOnLongClickListener {
+                        if (!cfg.lockLayout) enterEditMode()
+                        true
+                    }
+                }
+            }
+
+            if (isEditMode) {
+                cell.startJiggle(dockItems.indexOf(item) * 11)
+                val badge = ImageView(this).apply {
+                    layoutParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                        setMargins(0, 0, dp(26), 0)
+                    }
+                    setBackgroundResource(R.drawable.bg_badge_delete)
+                    setImageResource(R.drawable.ic_minus)
+                    setPadding(dp(5), dp(5), dp(5), dp(5))
+                    setOnClickListener { confirmDeleteItem(item) }
+                }
+                cell.addView(badge)
+                cell.setOnLongClickListener {
+                    startDragItem(item, cell)
+                }
+            } else {
+                cell.stopJiggle()
+            }
+
+            cell.addView(iv)
+            cell.tag = item
+            dock.addView(cell)
+        }
+
+        // Tombol Pustaka Aplikasi di dock jika diaktifkan di pengaturan
+        if (cfg.showDrawerButton) {
+            val cell = FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val iv = ImageView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(size, size, Gravity.CENTER)
+                setImageResource(R.drawable.ic_drawer)
+                pressEffect()
+                setOnClickListener { openDrawer() }
+            }
+            cell.addView(iv)
+            dock.addView(cell)
+        }
+    }
+
+    private fun setupDockDrag() {
+        dock.setOnDragListener { _, event ->
+            val draggedItem = event.localState as? LauncherItem ?: return@setOnDragListener false
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DROP -> handleDockDrop(event, draggedItem)
+                else -> true
+            }
+        }
+    }
+
+    private fun handleDockDrop(event: DragEvent, draggedItem: LauncherItem): Boolean {
+        cancelEdgeScroll()
+        if (cfg.lockLayout) return false
+        if (draggedItem.type != ItemType.APP && draggedItem.type != ItemType.FOLDER) {
+            Toast.makeText(this, "Hanya aplikasi dan folder yang bisa di dock", Toast.LENGTH_SHORT).show()
+            return false
+        }
+
+        val dockWidth = dock.width.toFloat().coerceAtLeast(1f)
+        val dropX = event.x
+        val slotIndex = ((dropX / dockWidth) * MAX_DOCK).toInt().coerceIn(0, MAX_DOCK - 1)
+
+        val targetItem = dockItems.getOrNull(slotIndex)
+
+        // Drop di atas item dock lain -> buat folder di dock
+        if (draggedItem.type == ItemType.APP && targetItem != null && targetItem.type == ItemType.APP && targetItem.id != draggedItem.id) {
+            homeItems.removeAll { it.id == draggedItem.id }
+            dockItems.remove(draggedItem)
+            dockItems.remove(targetItem)
+
+            val folder = LauncherItem(
+                type = ItemType.FOLDER,
+                customTitle = "Folder"
+            ).apply {
+                folderItems.add(targetItem)
+                folderItems.add(draggedItem)
+            }
+            val insertPos = slotIndex.coerceIn(0, dockItems.size)
+            dockItems.add(insertPos, folder)
+            cfg.setHomeItems(homeItems)
+            cfg.setDockItems(dockItems)
+            renderHome()
+            renderDock()
+            Toast.makeText(this, "Folder dibuat di dock", Toast.LENGTH_SHORT).show()
+            return true
+        }
+
+        if (draggedItem in dockItems) {
+            // Reorder dalam dock
+            dockItems.remove(draggedItem)
+            val insertPos = slotIndex.coerceIn(0, dockItems.size)
+            dockItems.add(insertPos, draggedItem)
+            cfg.setDockItems(dockItems)
+            renderDock()
+            return true
+        }
+
+        // Dari home pindah ke dock
+        if (dockItems.size >= MAX_DOCK) {
+            Toast.makeText(this, "Dock penuh (maks. $MAX_DOCK)", Toast.LENGTH_SHORT).show()
+            return false
+        }
+
+        homeItems.removeAll { it.id == draggedItem.id }
+        val insertPos = slotIndex.coerceIn(0, dockItems.size)
+        dockItems.add(insertPos, draggedItem)
+        cfg.setHomeItems(homeItems)
+        cfg.setDockItems(dockItems)
+        renderHome()
+        renderDock()
+        Toast.makeText(this, "Dipindahkan ke dock", Toast.LENGTH_SHORT).show()
+        return true
     }
 
     private fun addToDock(app: AppInfo) {
-        val current = dockPackages().toMutableList()
-        if (app.packageName in current) {
-            Toast.makeText(this, "Sudah ada di dock", Toast.LENGTH_SHORT).show()
+        if (dockItems.size >= MAX_DOCK) {
+            Toast.makeText(this, "Dock penuh (maks. $MAX_DOCK)", Toast.LENGTH_SHORT).show()
             return
         }
-        if (current.size >= MAX_DOCK) {
-            Toast.makeText(
-                this,
-                "Dock penuh (maks. $MAX_DOCK). Tahan ikon di dock untuk menghapus.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-        current.add(app.packageName)
-        cfg.setList("dock", current)
+        val item = LauncherItem(
+            type = ItemType.APP,
+            packageName = app.packageName,
+            componentName = app.component.flattenToString()
+        )
+        dockItems.add(item)
+        cfg.setDockItems(dockItems)
         renderDock()
         Toast.makeText(this, "${app.label} ditambahkan ke dock", Toast.LENGTH_SHORT).show()
     }
 
-    private fun removeFromDock(app: AppInfo) {
-        val current = dockPackages().toMutableList()
-        current.remove(app.packageName)
-        cfg.setList("dock", current)
+    private fun removeFromDock(item: LauncherItem) {
+        dockItems.removeAll { it.id == item.id }
+        cfg.setDockItems(dockItems)
         renderDock()
-        Toast.makeText(this, "${app.label} dihapus dari dock", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Dihapus dari dock", Toast.LENGTH_SHORT).show()
     }
 
     // ================================================================ halaman layar utama
@@ -659,9 +842,6 @@ class MainActivity : Activity() {
         homePagerAdapter.notifyDataSetChanged()
     }
 
-    /**
-     * Menempatkan aplikasi baru yang baru terpasang di sel kosong pertama.
-     */
     private fun onNewPackageAdded(pkg: String) {
         if (pkg in cfg.hidden) return
         if (homeItems.any { it.type == ItemType.APP && it.packageName == pkg }) return
@@ -788,6 +968,260 @@ class MainActivity : Activity() {
         cfg.setHomeItems(homeItems)
         renderHome()
         Toast.makeText(this, "Dihapus dari layar utama", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun confirmDeleteItem(item: LauncherItem) {
+        if (item.type == ItemType.WIDGET) {
+            removeWidget(item)
+            return
+        }
+        val app = allApps.find { it.packageName == item.packageName }
+        val title = item.customTitle ?: app?.label ?: "Item"
+
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setItems(arrayOf("Hapus dari layar utama", "Copot pemasangan", "Batal")) { _, which ->
+                when (which) {
+                    0 -> {
+                        homeItems.removeAll { it.id == item.id }
+                        dockItems.removeAll { it.id == item.id }
+                        cfg.setHomeItems(homeItems)
+                        cfg.setDockItems(dockItems)
+                        renderHome()
+                        renderDock()
+                    }
+                    1 -> {
+                        if (item.packageName.isNotEmpty()) {
+                            startActivity(
+                                Intent(Intent.ACTION_DELETE, Uri.fromParts("package", item.packageName, null))
+                            )
+                        }
+                    }
+                }
+            }
+            .show()
+    }
+
+    // ================================================================ drag and drop
+
+    private fun startDragItem(item: LauncherItem, view: View): Boolean {
+        if (cfg.lockLayout) return false
+        val clip = ClipData.newPlainText("item_id", item.id)
+        val shadow = View.DragShadowBuilder(view)
+        view.startDragAndDrop(clip, shadow, item, 0)
+        view.alpha = 0.2f
+        return true
+    }
+
+    private fun handleCellDrag(page: Int, cellLayout: CellLayout, event: DragEvent): Boolean {
+        val draggedItem = event.localState as? LauncherItem ?: return false
+
+        when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED -> return true
+
+            DragEvent.ACTION_DRAG_LOCATION -> {
+                // Auto scroll halaman di tepi layar
+                val edgePad = dp(45)
+                if (event.x < edgePad) {
+                    if (page > 0 && edgeScrollRunnable == null) {
+                        edgeScrollRunnable = Runnable {
+                            homePager.currentItem = page - 1
+                            edgeScrollRunnable = null
+                        }
+                        edgeScrollHandler.postDelayed(edgeScrollRunnable!!, 600)
+                    }
+                } else if (event.x > cellLayout.width - edgePad) {
+                    if (page < homePagerAdapter.pageCount - 1 && edgeScrollRunnable == null) {
+                        edgeScrollRunnable = Runnable {
+                            homePager.currentItem = page + 1
+                            edgeScrollRunnable = null
+                        }
+                        edgeScrollHandler.postDelayed(edgeScrollRunnable!!, 600)
+                    }
+                } else {
+                    cancelEdgeScroll()
+                }
+                return true
+            }
+
+            DragEvent.ACTION_DROP -> {
+                cancelEdgeScroll()
+                val (targetX, targetY) = cellLayout.pointToCell(event.x, event.y)
+                val targetChild = cellLayout.findChildAtCell(targetX, targetY)
+                val targetItem = targetChild?.tag as? LauncherItem
+
+                // 1. Drop ke aplikasi lain -> Buat Folder
+                if (draggedItem.type == ItemType.APP &&
+                    targetItem != null && targetItem.type == ItemType.APP &&
+                    targetItem.id != draggedItem.id
+                ) {
+                    homeItems.removeAll { it.id == draggedItem.id || it.id == targetItem.id }
+                    dockItems.removeAll { it.id == draggedItem.id || it.id == targetItem.id }
+
+                    val folder = LauncherItem(
+                        type = ItemType.FOLDER,
+                        page = page,
+                        cellX = targetX,
+                        cellY = targetY,
+                        customTitle = "Folder"
+                    ).apply {
+                        folderItems.add(targetItem)
+                        folderItems.add(draggedItem)
+                    }
+                    homeItems.add(folder)
+                    cfg.setHomeItems(homeItems)
+                    cfg.setDockItems(dockItems)
+                    renderHome()
+                    renderDock()
+                    Toast.makeText(this, "Folder dibuat", Toast.LENGTH_SHORT).show()
+                    return true
+                }
+
+                // 2. Drop ke folder yang sudah ada -> Masukkan ke folder
+                if (draggedItem.type == ItemType.APP &&
+                    targetItem != null && targetItem.type == ItemType.FOLDER &&
+                    targetItem.id != draggedItem.id
+                ) {
+                    homeItems.removeAll { it.id == draggedItem.id }
+                    dockItems.removeAll { it.id == draggedItem.id }
+                    targetItem.folderItems.add(draggedItem)
+                    cfg.setHomeItems(homeItems)
+                    cfg.setDockItems(dockItems)
+                    renderHome()
+                    renderDock()
+                    Toast.makeText(this, "Ditambahkan ke folder", Toast.LENGTH_SHORT).show()
+                    return true
+                }
+
+                // 3. Drop ke sel kosong atau tukar posisi
+                dockItems.removeAll { it.id == draggedItem.id }
+                cfg.setDockItems(dockItems)
+
+                if (targetItem != null && targetItem.id != draggedItem.id) {
+                    targetItem.page = draggedItem.page
+                    targetItem.cellX = draggedItem.cellX
+                    targetItem.cellY = draggedItem.cellY
+                }
+
+                draggedItem.page = page
+                draggedItem.cellX = targetX
+                draggedItem.cellY = targetY
+
+                if (!homeItems.any { it.id == draggedItem.id }) {
+                    homeItems.add(draggedItem)
+                }
+
+                cfg.setHomeItems(homeItems)
+                renderHome()
+                renderDock()
+                return true
+            }
+
+            DragEvent.ACTION_DRAG_ENDED -> {
+                cancelEdgeScroll()
+                renderHome()
+                renderDock()
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun cancelEdgeScroll() {
+        edgeScrollRunnable?.let { edgeScrollHandler.removeCallbacks(it) }
+        edgeScrollRunnable = null
+    }
+
+    // ================================================================ dialog folder
+
+    private fun showFolderDialog(folder: LauncherItem) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_folder, null)
+        val titleEdit = dialogView.findViewById<EditText>(R.id.folderTitle)
+        val folderRecycler = dialogView.findViewById<RecyclerView>(R.id.folderRecycler)
+
+        titleEdit.setText(folder.customTitle ?: "Folder")
+
+        var dialog: AlertDialog? = null
+
+        val folderApps = folder.folderItems.mapNotNull { child ->
+            allApps.find { it.packageName == child.packageName }?.let { app ->
+                Pair(child, app)
+            }
+        }
+
+        val adapter = AppAdapter(
+            onClick = { app, v ->
+                dialog?.dismiss()
+                launch(app, v)
+            },
+            onLongClick = { app, _ ->
+                AlertDialog.Builder(this)
+                    .setTitle(app.label)
+                    .setItems(arrayOf("Keluarkan dari folder", "Info aplikasi", "Copot pemasangan")) { _, which ->
+                        when (which) {
+                            0 -> {
+                                val removedChild = folder.folderItems.find { it.packageName == app.packageName }
+                                if (removedChild != null) {
+                                    folder.folderItems.remove(removedChild)
+                                    addToHome(app)
+                                    if (folder.folderItems.size <= 1) {
+                                        folder.folderItems.forEach { rem ->
+                                            allApps.find { it.packageName == rem.packageName }?.let { addToHome(it) }
+                                        }
+                                        homeItems.removeAll { it.id == folder.id }
+                                        dockItems.removeAll { it.id == folder.id }
+                                    }
+                                    cfg.setHomeItems(homeItems)
+                                    cfg.setDockItems(dockItems)
+                                    renderHome()
+                                    renderDock()
+                                    dialog?.dismiss()
+                                }
+                            }
+                            1 -> {
+                                startActivity(
+                                    Intent(
+                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.fromParts("package", app.packageName, null)
+                                    )
+                                )
+                            }
+                            2 -> {
+                                startActivity(
+                                    Intent(Intent.ACTION_DELETE, Uri.fromParts("package", app.packageName, null))
+                                )
+                            }
+                        }
+                    }
+                    .show()
+            }
+        )
+
+        adapter.submit(folderApps.map { it.second })
+        adapter.applyStyle(dp(cfg.iconSizeDp), cfg.showLabels, Color.WHITE)
+
+        folderRecycler.layoutManager = GridLayoutManager(this, 3)
+        folderRecycler.adapter = adapter
+
+        titleEdit.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                val newTitle = s.toString().trim()
+                folder.customTitle = if (newTitle.isNotEmpty()) newTitle else null
+                cfg.setHomeItems(homeItems)
+                cfg.setDockItems(dockItems)
+                renderHome()
+                renderDock()
+            }
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        })
+
+        dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.show()
     }
 
     // ================================================================ widget Android
@@ -969,6 +1403,26 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun removeWidget(item: LauncherItem) {
+        if (cfg.lockLayout) {
+            Toast.makeText(this, "Tata letak terkunci", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val wid = item.widgetId
+        if (wid != null) {
+            try {
+                appWidgetHost.deleteAppWidgetId(wid)
+            } catch (e: Exception) {
+                // abaikan
+            }
+            cfg.widgetIds = cfg.widgetIds - wid
+        }
+        homeItems.removeAll { it.id == item.id }
+        cfg.setHomeItems(homeItems)
+        renderHome()
+        Toast.makeText(this, "Widget dihapus", Toast.LENGTH_SHORT).show()
+    }
+
     private fun showRemoveWidget() {
         val widgetItems = homeItems.filter { it.type == ItemType.WIDGET && it.widgetId != null }
         if (widgetItems.isEmpty()) {
@@ -985,20 +1439,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Hapus widget")
             .setItems(names.toTypedArray()) { _, which ->
-                val item = widgetItems[which]
-                val wid = item.widgetId
-                if (wid != null) {
-                    try {
-                        appWidgetHost.deleteAppWidgetId(wid)
-                    } catch (e: Exception) {
-                        // abaikan
-                    }
-                    cfg.widgetIds = cfg.widgetIds - wid
-                }
-                homeItems.remove(item)
-                cfg.setHomeItems(homeItems)
-                renderHome()
-                Toast.makeText(this, "Widget dihapus", Toast.LENGTH_SHORT).show()
+                removeWidget(widgetItems[which])
             }
             .setNegativeButton("Batal", null)
             .show()
@@ -1011,6 +1452,8 @@ class MainActivity : Activity() {
         val actions = mutableListOf<() -> Unit>()
 
         if (!cfg.lockLayout) {
+            labels.add("Ubah tata letak (Mode edit)")
+            actions.add { enterEditMode() }
             labels.add("Tambah widget")
             actions.add { showWidgetPicker() }
             if (homeItems.any { it.type == ItemType.WIDGET }) {
@@ -1033,6 +1476,8 @@ class MainActivity : Activity() {
         val actions = mutableListOf<() -> Unit>()
 
         if (!cfg.lockLayout) {
+            labels.add("Ubah tata letak (Mode edit)")
+            actions.add { enterEditMode() }
             labels.add("Hapus dari layar utama")
             actions.add { removeFromHome(item) }
         }
@@ -1142,6 +1587,7 @@ class MainActivity : Activity() {
             "Ukuran ikon: ${LauncherPrefs.ICON_SIZE_NAMES[cfg.iconSizeIndex]}",
             "Ukuran grid: ${LauncherPrefs.GRID_NAMES[cfg.gridIndex]}",
             "Kunci tata letak: ${onOff(cfg.lockLayout, "Terkunci", "Terbuka")}",
+            "Tombol Pustaka di dock: ${onOff(cfg.showDrawerButton, "Tampil", "Sembunyi")}",
             "Nama aplikasi: ${onOff(cfg.showLabels, "Tampil", "Sembunyi")}",
             "Warna nama di layar utama: ${LauncherPrefs.LABEL_COLOR_NAMES[cfg.labelColorIndex]}",
             "Pengaturan widget jam",
@@ -1172,31 +1618,36 @@ class MainActivity : Activity() {
                         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
                         showSettings()
                     }
-                    3 -> chooseOne("Nama aplikasi", arrayOf("Tampil", "Sembunyi"), if (cfg.showLabels) 0 else 1) {
+                    3 -> {
+                        cfg.showDrawerButton = !cfg.showDrawerButton
+                        renderDock()
+                        showSettings()
+                    }
+                    4 -> chooseOne("Nama aplikasi", arrayOf("Tampil", "Sembunyi"), if (cfg.showLabels) 0 else 1) {
                         cfg.showLabels = (it == 0)
                         applyStyles()
                         showSettings()
                     }
-                    4 -> chooseOne("Warna nama di layar utama", LauncherPrefs.LABEL_COLOR_NAMES, cfg.labelColorIndex) {
+                    5 -> chooseOne("Warna nama di layar utama", LauncherPrefs.LABEL_COLOR_NAMES, cfg.labelColorIndex) {
                         cfg.labelColorIndex = it
                         applyStyles()
                         showSettings()
                     }
-                    5 -> showClockSettings()
-                    6 -> chooseOne("Transparansi kaca", LauncherPrefs.GLASS_NAMES, cfg.glassIndex) {
+                    6 -> showClockSettings()
+                    7 -> chooseOne("Transparansi kaca", LauncherPrefs.GLASS_NAMES, cfg.glassIndex) {
                         cfg.glassIndex = it
                         applyStyles()
                         showSettings()
                     }
-                    7 -> chooseOne("Refresh rate tertinggi", arrayOf("Aktif", "Mati"), if (cfg.highRefresh) 0 else 1) {
+                    8 -> chooseOne("Refresh rate tertinggi", arrayOf("Aktif", "Mati"), if (cfg.highRefresh) 0 else 1) {
                         cfg.highRefresh = (it == 0)
                         applyStyles()
                         showSettings()
                     }
-                    8 -> showPageManager()
-                    9 -> showHiddenApps()
-                    10 -> confirmReset()
-                    11 -> openDefaultLauncherSettings()
+                    9 -> showPageManager()
+                    10 -> showHiddenApps()
+                    11 -> confirmReset()
+                    12 -> openDefaultLauncherSettings()
                 }
             }
             .setNegativeButton("Tutup", null)
@@ -1305,6 +1756,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Atur ulang") { _, _ ->
                 cfg.resetLayout()
                 homeItems.clear()
+                dockItems.clear()
                 renderHome()
                 renderDock()
                 Toast.makeText(this, "Layar utama dan dock diatur ulang", Toast.LENGTH_SHORT).show()

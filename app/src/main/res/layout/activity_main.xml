@@ -86,6 +86,22 @@
             android:paddingVertical="16dp" />
     </LinearLayout>
 
+    <!-- Tombol Selesai Mode Edit ala iOS -->
+    <TextView
+        android:id="@+id/btnDoneEdit"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="36dp"
+        android:layout_marginEnd="20dp"
+        android:background="@drawable/bg_done_button"
+        android:elevation="8dp"
+        android:fontFamily="sans-serif-medium"
+        android:text="Selesai"
+        android:textColor="#FF000000"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
     <!-- ============ PUSTAKA APLIKASI ============ -->
     <LinearLayout
         android:id="@+id/drawerLayer"

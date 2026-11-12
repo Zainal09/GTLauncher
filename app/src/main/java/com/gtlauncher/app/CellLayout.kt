@@ -146,4 +146,34 @@ class CellLayout @JvmOverloads constructor(
         }
         return null
     }
+
+    /**
+     * Mengonversi koordinat pixel (x, y) menjadi koordinat sel (cellX, cellY).
+     */
+    fun pointToCell(px: Float, py: Float): Pair<Int, Int> {
+        val availW = (width - paddingLeft - paddingRight).coerceAtLeast(1)
+        val availH = (height - paddingTop - paddingBottom).coerceAtLeast(1)
+        val cellW = if (columns > 0) availW / columns else 1
+        val cellH = if (rows > 0) availH / rows else 1
+
+        val cx = ((px - paddingLeft) / cellW).toInt().coerceIn(0, columns - 1)
+        val cy = ((py - paddingTop) / cellH).toInt().coerceIn(0, rows - 1)
+        return Pair(cx, cy)
+    }
+
+    /**
+     * Mencari child view yang menempati sel (cellX, cellY).
+     */
+    fun findChildAtCell(cellX: Int, cellY: Int, ignoreView: View? = null): View? {
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            if (child === ignoreView || child.visibility == View.GONE) continue
+            val lp = child.layoutParams as? LayoutParams ?: continue
+            if (cellX >= lp.cellX && cellX < lp.cellX + lp.spanX &&
+                cellY >= lp.cellY && cellY < lp.cellY + lp.spanY) {
+                return child
+            }
+        }
+        return null
+    }
 }
