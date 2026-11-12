@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, master, feature/priority ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 # Izin untuk membuat GitHub Release (dipakai Obtainium untuk memantau versi baru)
