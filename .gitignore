@@ -1,9 +1,4 @@
 .gradle/
-.gradle-home/
-.gh/
-.gh-ro/
-.android-home/
-tools/
 build/
 local.properties
 .idea/
@@ -12,3 +7,9 @@ captures/
 .externalNativeBuild/
 .cxx/
 *.apk
+
+.android-home/
+.gh-ro/
+.gh/
+.gradle-home/
+tools/

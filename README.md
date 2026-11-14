@@ -4,49 +4,26 @@ Launcher Android sederhana (Kotlin + XML, tanpa Compose) yang dibuild otomatis o
 Cocok ditulis di laptop spek rendah: laptop cuma dipakai menulis kode, server GitHub yang membuild APK.
 
 ## Fitur
-- Tema bergaya iOS: ikon squircle seragam, widget jam kaca, dock kaca
-- Mode edit ala iOS: tahan lama, ikon bergoyang (jiggle mode), tombol hapus (-) di pojok, dan tombol Selesai
-- Drag and drop: geser posisi ikon di layar utama dan antar-halaman otomatis saat digeser ke tepi layar
-- Folder: seret ikon ke ikon lain untuk membuat folder, pratinjau mini 3x3 kaca, dialog buka folder dengan nama yang bisa diubah
-- Dock interaktif: atur urutan ikon dengan drag, folder di dock, dan tombol Pustaka Aplikasi di dock (opsional di Pengaturan)
-- Banyak halaman layar utama geser horizontal dengan titik indikator (dots indicator)
-- Ukuran grid bebas: 4x4, 4x5, 4x6, 5x5, 5x6, 6x6, hingga 6x7
-- Kunci tata letak (mencegah perubahan/penghapusan tidak sengaja)
-- Aplikasi baru otomatis dialokasikan ke sel/halaman kosong, halaman dituju otomatis, dan ikon diberi sorotan
-- Widget Android dari aplikasi lain (cuaca, kalender, dll.): tahan area kosong > Tambah widget; pemilih widget menampilkan pratinjau gambar
-- Ubah ukuran widget di mode edit: tombol panah di pojok kanan bawah, pilih 1x1, 2x2, 4x2, dan ukuran lain yang muat
+- Tema bergaya iOS: ikon squircle seragam, jam kaca, dock kaca
+- Banyak halaman layar utama (geser kiri-kanan, titik indikator, maks. 8 halaman)
+- Mode edit ala iOS: tahan ikon/area kosong, ikon bergoyang, tombol - / x di pojok untuk hapus
+- Seret ikon, widget, dan jam ke posisi baru; posisi tersimpan. Seret ke tepi layar untuk pindah/buat halaman
+- Folder: seret ikon ke ikon lain; ketuk folder untuk membuka dan mengganti nama; seret keluar untuk mengeluarkan
+- Dock: atur urutan dengan drag, bisa berisi folder (4 slot, 5 jika grid 5+ kolom)
+- Ukuran grid 4x5 sampai 6x7 (Pengaturan > Ukuran grid)
+- Widget Android: pemilih dengan gambar pratinjau, geser, ubah ukuran (ketuk widget saat mode edit)
+- Kunci tata letak (tombol Kunci di mode edit, atau Pengaturan)
+- Aplikasi baru otomatis masuk ke slot kosong dengan titik biru sampai pertama kali dibuka
 - Pustaka Aplikasi: geser ke atas; grid, pencarian, tombol Go membuka hasil teratas
-- Kategori otomatis ala iOS App Library: Semua, Sosial, Game, Produktivitas, Hiburan, Lainnya
-- Indeks huruf A-Z di tepi kanan dengan fast scroller
-- Urutkan aplikasi: A-Z, terbaru dipasang, paling sering dipakai
-- Baris "Terakhir dipakai" dan "Paling sering" di atas daftar (butuh izin Usage Access)
-- Ganti nama dan ganti ikon per aplikasi (ikon dari galeri, disimpan permanen)
-- Pilih banyak aplikasi sekaligus untuk ditambahkan ke layar utama, disembunyikan, atau dicopot
 - Geser ke bawah di layar utama: panel notifikasi
-- Tahan aplikasi di Pustaka: tambah ke layar utama / dock, ganti nama/ikon, pilih banyak, sembunyikan, info, copot
-- Ketuk widget jam: buka aplikasi jam
-- Animasi: aplikasi membesar dari ikon saat dibuka, layar utama memudar masuk saat kembali
-- Pengaturan (tahan area kosong > Pengaturan launcher): ukuran ikon, grid, kunci tata letak, tombol dock, kelola halaman, nama aplikasi, warna nama,
-  widget jam (tampil, 12/24 jam, tanggal, warna), transparansi kaca, paksa refresh rate tertinggi,
-  aplikasi tersembunyi, atur ulang, jadikan launcher default, serta pengaturan Pustaka Aplikasi
+- Pengaturan: ukuran ikon, nama aplikasi, warna nama, widget jam, transparansi kaca, refresh rate tertinggi,
+  aplikasi tersembunyi, atur ulang, jadikan launcher default
 
-## Fokus pembaruan ini (Fase 3)
-Bagian 1 (penempatan & layout) dan bagian 2 (Pustaka Aplikasi) diprioritaskan:
-- resize widget + pemilih widget berpratinjau
-- kategori otomatis, indeks A-Z, urutan, baris terakhir/paling sering
-- ganti nama/ikon per aplikasi, pilih banyak aplikasi
-- sorotan aplikasi baru
-
-Fitur bagian 3-10 (pencarian universal, gesture lanjutan, widget bawaan, tema lanjutan, control center, privasi, mode gamer, backup) menyusul.
-
-## Izin opsional
-- **Usage Access** (Pengaturan > Akses khusus > Akses penggunaan): baris "Terakhir dipakai"/"Paling sering".
-- **Akses notifikasi**: badge dan pratinjau notifikasi (fitur lanjutan).
-- **Aksesibilitas**: kunci layar dari gesture (fitur lanjutan).
-
+## Belum ada (menyusul)
+Badge notifikasi, icon pack, gesture ketuk dua kali untuk kunci layar, backup pengaturan.
 
 ## Pembaruan otomatis dengan Obtainium
-Setiap `git push` ke branch main membuat GitHub Release baru berisi APK (versi naik sendiri, mis. 1.3.7).
+Setiap `git push` ke branch main membuat GitHub Release baru berisi APK (versi naik sendiri, mis. 1.4.7).
 1. Pasang **Obtainium** di HP (unduh APK-nya dari https://github.com/ImranR98/Obtainium/releases).
 2. Buka Obtainium, ketuk **Add App**, tempel alamat repo `https://github.com/USERNAME/GTLauncher`, lalu **Add**.
 3. Pasang GT Launcher lewat Obtainium. Setelah itu, versi baru muncul sebagai pembaruan, tinggal ketuk **Update**.
